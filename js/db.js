@@ -31,6 +31,7 @@
       pocketItems: [],
       recurringIncomes: [],
       transactions: [],
+      scannedPhotos: {},
     };
   }
 
@@ -223,6 +224,8 @@
         pocketId: tx.pocketId || null,
         pocketItemId: tx.pocketItemId || null,
         receiptImage: tx.receiptImage || null,
+        payee: tx.payee || "",
+        autoLogged: !!tx.autoLogged,
       };
       data.transactions.push(t);
       persist();
@@ -235,6 +238,29 @@
     },
     deleteTransaction(id) {
       data.transactions = data.transactions.filter((t) => t.id !== id);
+      persist();
+    },
+
+    // Remembers which category a payee/recipient was categorized as last,
+    // so future auto-logged slips from the same payee reuse it.
+    findCategoryForPayee(payee) {
+      if (!payee) return null;
+      const needle = payee.trim().toLowerCase();
+      if (!needle) return null;
+      const matches = data.transactions
+        .filter((t) => t.payee && t.categoryId && t.payee.trim().toLowerCase() === needle)
+        .sort((a, b) => (a.date < b.date ? 1 : -1));
+      return matches.length ? matches[0].categoryId : null;
+    },
+
+    // Native gallery auto-scan: remembers exactly which photos have already
+    // been read (by native media id), so nothing is scanned twice or missed.
+    isPhotoScanned(photoId) {
+      return !!(data.scannedPhotos && data.scannedPhotos[photoId]);
+    },
+    markPhotoScanned(photoId) {
+      if (!data.scannedPhotos) data.scannedPhotos = {};
+      data.scannedPhotos[photoId] = Date.now();
       persist();
     },
   };

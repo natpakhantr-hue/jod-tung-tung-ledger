@@ -52,15 +52,36 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
 
+  // Best-effort recipient/payee extraction for Thai bank transfer slips.
+  // Looks for a line introduced by a "to/recipient" keyword and takes the name
+  // that follows it (same line, or the next non-empty line if the label is alone).
+  const PAYEE_KEYWORDS = /(ไปยัง|ไปที่|ถึง|ผู้รับโอน|ผู้รับเงิน|received?\s*by|receiver|payee|to\s*[:\-])/i;
+  const SKIP_LINE = /^[\s\d.,฿$\-:\/]*$/; // lines that are just numbers/punctuation, not a name
+
+  function extractPayee(text) {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(PAYEE_KEYWORDS);
+      if (!m) continue;
+      let rest = lines[i].slice(m.index + m[0].length).replace(/^[:\-\s]+/, "").trim();
+      if (rest && !SKIP_LINE.test(rest)) return rest.slice(0, 60);
+      // label was on its own line — take the next non-empty, non-numeric line
+      for (let j = i + 1; j < lines.length && j <= i + 2; j++) {
+        if (lines[j] && !SKIP_LINE.test(lines[j])) return lines[j].slice(0, 60);
+      }
+    }
+    return null;
+  }
+
   async function scanReceipt(imageSource, onProgress) {
     await loadTesseract();
-    const { data } = await window.Tesseract.recognize(imageSource, "eng", {
+    const { data } = await window.Tesseract.recognize(imageSource, "eng+tha", {
       logger: (m) => {
         if (onProgress && m.status === "recognizing text") onProgress(m.progress);
       },
     });
     const text = data.text || "";
-    return { text, amount: extractAmount(text), date: extractDate(text) };
+    return { text, amount: extractAmount(text), date: extractDate(text), payee: extractPayee(text) };
   }
 
   window.OCR = { scanReceipt };

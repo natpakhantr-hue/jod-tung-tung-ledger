@@ -114,9 +114,14 @@
   }
 
   window.addEventListener("hashchange", render);
-  // Native-only (Capacitor Android wrapper): on app open, silently check for a new
-  // photo since last time and auto-scan it. Only surfaces a draft if it actually
-  // looks like a slip (an amount was detected) — otherwise it's invisible to the user.
+  // Native-only (Capacitor Android wrapper): on app open, check every new photo
+  // since last time — could be several if the app's been closed a while — and
+  // auto-log any that look like a real slip. Every photo checked is remembered
+  // by id so nothing is ever scanned twice or silently skipped. No popup, ever.
+  function photoIdFromUri(uri) {
+    return uri.split("/").pop();
+  }
+
   async function checkNativeGallery() {
     const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
     if (!isNative) return;
@@ -128,16 +133,50 @@
       if (!perm.granted) perm = await GalleryScan.requestPhotoPermission();
       if (!perm.granted) return;
 
-      const lastCheck = Number(localStorage.getItem("gallery_last_scan_ts") || 0);
+      // "since" just bounds the query for performance; DB.isPhotoScanned is the
+      // real source of truth for what's already been read, so nothing gets missed
+      // or double-processed even if this timestamp drifts.
+      const hasCheckedBefore = !!localStorage.getItem("gallery_last_scan_ts");
+      const lastCheck = Number(localStorage.getItem("gallery_last_scan_ts") || 0) || (Date.now() - 7 * 24 * 60 * 60 * 1000);
       const now = Date.now();
-      const { images } = await GalleryScan.getRecentImages({ since: lastCheck, limit: 5 });
+      const { images } = await GalleryScan.getRecentImages({ since: lastCheck, limit: 50 });
       localStorage.setItem("gallery_last_scan_ts", String(now));
       if (!images || !images.length) return;
 
-      const target = images[0];
-      const { base64 } = await GalleryScan.readImageBase64({ uri: target.uri });
-      const blob = await (await fetch("data:image/jpeg;base64," + base64)).blob();
-      await window.Views.handleSharedPhoto(blob, { silentIfNoAmount: true });
+      // First time ever running (no stored checkpoint): just establish the baseline,
+      // don't retroactively scan a week of old photos.
+      if (!hasCheckedBefore) {
+        images.forEach((img) => DB.markPhotoScanned(photoIdFromUri(img.uri)));
+        return;
+      }
+
+      const unseen = images.filter((img) => !DB.isPhotoScanned(photoIdFromUri(img.uri))).reverse(); // oldest first
+      if (!unseen.length) return;
+
+      let logged = 0;
+      let unreadable = 0;
+      for (const img of unseen) {
+        const id = photoIdFromUri(img.uri);
+        try {
+          const { base64 } = await GalleryScan.readImageBase64({ uri: img.uri });
+          const blob = await (await fetch("data:image/jpeg;base64," + base64)).blob();
+          const dataUrl = await window.Views.blobToResizedDataUrl(blob, 900);
+          const result = await window.Views.autoLogSlip(dataUrl);
+          if (result.logged) logged++;
+          else unreadable++;
+        } catch (e) {
+          unreadable++;
+        }
+        DB.markPhotoScanned(id);
+      }
+
+      if (logged) render();
+      if (logged || unreadable) {
+        const parts = [];
+        if (logged) parts.push(`${logged} slip${logged === 1 ? "" : "s"} logged automatically`);
+        if (unreadable) parts.push(`${unreadable} photo${unreadable === 1 ? "" : "s"} skipped (no amount found)`);
+        toast(parts.join(" · "));
+      }
     } catch (e) {
       console.error("Native gallery scan failed", e);
     }

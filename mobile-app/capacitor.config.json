@@ -1,5 +1,9 @@
 {
   "appId": "com.jodtungtung.ledger",
   "appName": "Ledger",
-  "webDir": "www"
+  "webDir": "www",
+  "server": {
+    "url": "https://natpakhantr-hue.github.io/jod-tung-tung-ledger/",
+    "cleartext": false
+  }
 }

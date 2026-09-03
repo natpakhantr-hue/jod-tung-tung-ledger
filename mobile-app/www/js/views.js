@@ -164,12 +164,16 @@
             const c = categoryById(t.categoryId);
             const pocket = t.pocketId ? DB.getPocket(t.pocketId) : null;
             const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : "💸";
+            const subParts = [];
+            if (pocket) subParts.push(escapeHtml(pocket.name));
+            if (t.payee) subParts.push(escapeHtml(t.payee));
+            if (t.note) subParts.push(escapeHtml(t.note));
             const row = el(`
               <div class="row-item">
                 <div class="emoji">${c ? c.icon : fallbackIcon}</div>
                 <div class="main">
-                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}</div>
-                  <div class="sub">${pocket ? escapeHtml(pocket.name) + " · " : ""}${escapeHtml(t.note || "")}</div>
+                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.autoLogged ? " 🤖" : ""}</div>
+                  <div class="sub">${subParts.join(" · ")}</div>
                 </div>
                 <div class="amt ${t.type}">${t.type === "income" ? "+" : "-"}${formatMoney(t.amount)}</div>
               </div>
@@ -630,6 +634,7 @@
           ${pockets.map((p) => `<option value="${p.id}" ${existing && existing.pocketId === p.id ? "selected" : ""}>${p.icon} ${escapeHtml(p.name)}</option>`).join("")}
         </select>
       </div>
+      <div class="field"><label>Payee / Recipient (optional)</label><input type="text" id="f-payee" value="${existing ? escapeHtml(existing.payee || "") : escapeHtml(ocr.payee || "")}" placeholder="e.g. 7-Eleven" /><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Future slips from the same payee will reuse whatever category you pick here.</div></div>
       <div class="field"><label>Tag (optional)</label><input type="text" id="f-tag" value="${existing ? escapeHtml(existing.tag || "") : ""}" placeholder="e.g. groceries" /></div>
       <div class="field"><label>Note (optional)</label><textarea id="f-note">${existing ? escapeHtml(existing.note || "") : (ocr.receiptImage ? "Imported from slip photo" : "")}</textarea></div>
       <div class="sheet-actions">
@@ -669,6 +674,7 @@
           date,
           categoryId: categoryId.v,
           pocketId: sheetBody.querySelector("#f-pocket").value || null,
+          payee: sheetBody.querySelector("#f-payee").value.trim(),
           tag: sheetBody.querySelector("#f-tag").value.trim(),
           note: sheetBody.querySelector("#f-note").value.trim(),
           receiptImage: sheetBody.dataset.receiptImage || null,
@@ -703,6 +709,14 @@
     if (result.date) {
       activeTxSheetBody.querySelector("#f-date").value = result.date;
     }
+    if (result.payee) {
+      activeTxSheetBody.querySelector("#f-payee").value = result.payee;
+      const rememberedCat = DB.findCategoryForPayee(result.payee);
+      if (rememberedCat) {
+        const chip = activeTxSheetBody.querySelector(`.cat-choice[data-v="${rememberedCat}"]`);
+        if (chip) chip.click();
+      }
+    }
     if (statusEl) {
       if (result.amount) {
         statusEl.textContent = `✓ Detected ${formatMoney(result.amount)}${result.date ? " on " + result.date : ""} — please verify`;
@@ -733,29 +747,14 @@
     });
   }
 
-  async function handleSharedPhoto(blob, opts) {
-    opts = opts || {};
+  async function handleSharedPhoto(blob) {
     let dataUrl;
     try {
       dataUrl = await blobToResizedDataUrl(blob, 900);
     } catch (e) {
-      if (!opts.silentIfNoAmount) App.toast("Couldn't read the shared photo");
+      App.toast("Couldn't read the shared photo");
       return;
     }
-
-    if (opts.silentIfNoAmount) {
-      // Native auto-scan: OCR quietly first, only surface a draft if it looks like a real slip.
-      try {
-        const result = await OCR.scanReceipt(dataUrl);
-        if (!result.amount) return;
-        openTransactionForm(App.state, null, { receiptImage: dataUrl, scanning: false });
-        applyOcrResult(result);
-      } catch (e) {
-        // Silent failure is correct here — most photos scanned this way won't be slips.
-      }
-      return;
-    }
-
     openTransactionForm(App.state, null, { receiptImage: dataUrl, scanning: true });
     try {
       const result = await OCR.scanReceipt(dataUrl);
@@ -763,6 +762,35 @@
     } catch (e) {
       applyOcrResult({ amount: null, date: null });
       App.toast(e.message || "OCR failed");
+    }
+  }
+
+  function defaultAutoCategoryId() {
+    const bills = DB.listCategories("expense").find((c) => /bills?/i.test(c.name));
+    return (bills || DB.listCategories("expense")[0] || {}).id || null;
+  }
+
+  // Native gallery auto-scan (no popup, ever): OCRs the photo and, if an amount
+  // is found, logs the transaction straight to the ledger. Reuses the category
+  // last used for the same payee, if we've seen them before.
+  async function autoLogSlip(dataUrl) {
+    try {
+      const result = await OCR.scanReceipt(dataUrl);
+      if (!result.amount) return { logged: false };
+      const categoryId = (result.payee && DB.findCategoryForPayee(result.payee)) || defaultAutoCategoryId();
+      DB.addTransaction({
+        date: result.date || todayISO(),
+        type: "expense",
+        amount: result.amount,
+        categoryId,
+        payee: result.payee || "",
+        note: "Auto-logged from slip photo",
+        receiptImage: dataUrl,
+        autoLogged: true,
+      });
+      return { logged: true, amount: result.amount, payee: result.payee };
+    } catch (e) {
+      return { logged: false, error: e.message };
     }
   }
 
@@ -1056,5 +1084,7 @@
     settings,
     openTransactionForm,
     handleSharedPhoto,
+    autoLogSlip,
+    blobToResizedDataUrl,
   };
 })();
