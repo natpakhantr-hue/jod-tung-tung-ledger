@@ -245,29 +245,66 @@
     }
   }
 
+  function hideBootSplash() {
+    const splash = document.getElementById("boot-splash");
+    if (splash) {
+      splash.classList.add("hidden");
+      setTimeout(() => splash.remove(), 300);
+    }
+  }
+
+  function showUpdateBanner(text) {
+    let b = document.getElementById("update-banner");
+    if (!b) {
+      b = Utils.el(`<div id="update-banner" class="update-banner"><div class="boot-spinner"></div><span id="update-banner-text"></span></div>`);
+      document.body.appendChild(b);
+    }
+    b.querySelector("#update-banner-text").textContent = text;
+    requestAnimationFrame(() => b.classList.add("show"));
+  }
+
+  // Fetches the tiny version.json (always network-fresh, bypassing cache) and
+  // compares it to the version this page was actually loaded with. Only when
+  // they differ do we show the "Updating…" banner and reload — so resuming the
+  // app never flickers or reloads unless something genuinely changed.
+  async function checkForUpdate() {
+    try {
+      const res = await fetch("version.json", { cache: "no-store" });
+      const data = await res.json();
+      if (data.version && data.version !== window.APP_VERSION) {
+        showUpdateBanner("Updating to the latest version…");
+        setTimeout(() => location.reload(), 700);
+        return true;
+      }
+    } catch (e) {
+      // offline or unreachable — just skip, nothing to show the user
+    }
+    return false;
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     buildShell();
     render();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(() => {});
     }
-    sessionStorage.setItem("last_reload_check", String(Date.now()));
     runChecks();
+    hideBootSplash();
   });
 
   // Android doesn't reload the page when the app is resumed from the background —
   // it's the same live WebView coming back to the foreground, still running whatever
   // JS was already in memory — so DOMContentLoaded never fires again and code changes
-  // never show up. Force a real reload (fetching fresh code) on resume, but not more
-  // than once a minute so quickly switching back and forth doesn't cause flicker.
-  document.addEventListener("visibilitychange", () => {
+  // never show up on their own. Check for a real update on resume, at most once a
+  // minute, and only reload (with a visible banner) if one actually exists.
+  document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState !== "visible") return;
-    const last = Number(sessionStorage.getItem("last_reload_check") || 0);
+    const last = Number(sessionStorage.getItem("last_update_check") || 0);
     if (Date.now() - last > 60000) {
-      sessionStorage.setItem("last_reload_check", String(Date.now()));
-      location.reload();
-    } else {
-      runChecks();
+      sessionStorage.setItem("last_update_check", String(Date.now()));
+      const updating = await checkForUpdate();
+      if (updating) return;
     }
+    runChecks();
   });
 })();

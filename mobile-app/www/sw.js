@@ -2,6 +2,7 @@ const CACHE = "ledger-cache-v4";
 const ASSETS = [
   "./",
   "index.html",
+  "version.json",
   "manifest.webmanifest",
   "css/style.css",
   "js/db.js",
