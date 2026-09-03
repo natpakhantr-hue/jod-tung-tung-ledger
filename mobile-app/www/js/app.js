@@ -114,10 +114,18 @@
   }
 
   window.addEventListener("hashchange", render);
+
+  // Bump this whenever the native Android build is rebuilt/reinstalled. It resets
+  // the scan baseline so only slips added after that point get auto-logged —
+  // nothing already sitting in the album at install/update time is touched.
+  const NATIVE_BUILD_ID = "android-v3";
+
   // Native-only (Capacitor Android wrapper): on app open, check every new photo
-  // since last time — could be several if the app's been closed a while — and
-  // auto-log any that look like a real slip. Every photo checked is remembered
-  // by id so nothing is ever scanned twice or silently skipped. No popup, ever.
+  // in the user's chosen slip album since last time — could be several if the
+  // app's been closed a while — and auto-log any that look like a real slip.
+  // Every photo checked is remembered by id so nothing is ever scanned twice
+  // or silently skipped. No popup, ever. Only scans the one configured album,
+  // never the whole gallery.
   function photoIdFromUri(uri) {
     return uri.split("/").pop();
   }
@@ -128,25 +136,41 @@
     const GalleryScan = window.Capacitor.Plugins && window.Capacitor.Plugins.GalleryScan;
     if (!GalleryScan) return;
 
+    const album = DB.getSettings().slipAlbum;
+    if (!album) {
+      if (!localStorage.getItem("slip_album_hint_shown")) {
+        localStorage.setItem("slip_album_hint_shown", "1");
+        toast("Set your Bank Slip Album in Settings to enable auto-scan");
+      }
+      return;
+    }
+
     try {
       let perm = await GalleryScan.checkPhotoPermission();
       if (!perm.granted) perm = await GalleryScan.requestPhotoPermission();
       if (!perm.granted) return;
 
+      const storedBuildId = localStorage.getItem("gallery_build_id");
+      const isFreshBaseline = storedBuildId !== NATIVE_BUILD_ID;
+
       // "since" just bounds the query for performance; DB.isPhotoScanned is the
       // real source of truth for what's already been read, so nothing gets missed
       // or double-processed even if this timestamp drifts.
-      const hasCheckedBefore = !!localStorage.getItem("gallery_last_scan_ts");
       const lastCheck = Number(localStorage.getItem("gallery_last_scan_ts") || 0) || (Date.now() - 7 * 24 * 60 * 60 * 1000);
       const now = Date.now();
-      const { images } = await GalleryScan.getRecentImages({ since: lastCheck, limit: 50 });
+      const { images } = await GalleryScan.getRecentImages({ since: lastCheck, limit: 50, album });
       localStorage.setItem("gallery_last_scan_ts", String(now));
-      if (!images || !images.length) return;
+      if (!images || !images.length) {
+        if (isFreshBaseline) localStorage.setItem("gallery_build_id", NATIVE_BUILD_ID);
+        return;
+      }
 
-      // First time ever running (no stored checkpoint): just establish the baseline,
-      // don't retroactively scan a week of old photos.
-      if (!hasCheckedBefore) {
+      // Fresh install, or the app was just updated to a new native build: only
+      // establish the baseline (mark everything currently in the album as seen),
+      // don't retroactively process a backlog.
+      if (isFreshBaseline) {
         images.forEach((img) => DB.markPhotoScanned(photoIdFromUri(img.uri)));
+        localStorage.setItem("gallery_build_id", NATIVE_BUILD_ID);
         return;
       }
 

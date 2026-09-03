@@ -19,6 +19,9 @@ import com.getcapacitor.annotation.PermissionCallback;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 
 @CapacitorPlugin(
     name = "GalleryScan",
@@ -60,7 +63,43 @@ public class GalleryScanPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    // Lists every distinct album (MediaStore "bucket") that has images, newest-active first.
+    @PluginMethod
+    public void listAlbums(PluginCall call) {
+        if (!hasRequiredPermission()) {
+            call.reject("PERMISSION_DENIED");
+            return;
+        }
+        JSArray results = new JSArray();
+        String[] projection = { MediaStore.Images.Media.BUCKET_DISPLAY_NAME };
+        String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+
+        try (Cursor cursor = getContext().getContentResolver().query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, null, null, sortOrder)) {
+            if (cursor != null) {
+                int nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME);
+                while (cursor.moveToNext() && seen.size() < 150) {
+                    String name = cursor.getString(nameCol);
+                    if (name != null && seen.add(name)) {
+                        JSObject item = new JSObject();
+                        item.put("name", name);
+                        results.put(item);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            call.reject("Failed to list albums: " + e.getMessage());
+            return;
+        }
+
+        JSObject ret = new JSObject();
+        ret.put("albums", results);
+        call.resolve(ret);
+    }
+
     // Returns images added after `since` (epoch millis), newest first, capped at `limit`.
+    // If `album` is given, only images in that MediaStore bucket (folder) are returned.
     @PluginMethod
     public void getRecentImages(PluginCall call) {
         if (!hasRequiredPermission()) {
@@ -69,6 +108,7 @@ public class GalleryScanPlugin extends Plugin {
         }
         long since = (long) call.getDouble("since", 0.0).doubleValue();
         int limit = call.getInt("limit", 20);
+        String album = call.getString("album");
 
         JSArray results = new JSArray();
         String[] projection = {
@@ -76,8 +116,14 @@ public class GalleryScanPlugin extends Plugin {
             MediaStore.Images.Media.DATE_ADDED,
             MediaStore.Images.Media.DISPLAY_NAME
         };
+        List<String> args = new ArrayList<>();
+        args.add(String.valueOf(since / 1000L));
         String selection = MediaStore.Images.Media.DATE_ADDED + " > ?";
-        String[] selectionArgs = { String.valueOf(since / 1000L) };
+        if (album != null && !album.isEmpty()) {
+            selection += " AND " + MediaStore.Images.Media.BUCKET_DISPLAY_NAME + " = ?";
+            args.add(album);
+        }
+        String[] selectionArgs = args.toArray(new String[0]);
         String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
 
         try (Cursor cursor = getContext().getContentResolver().query(
