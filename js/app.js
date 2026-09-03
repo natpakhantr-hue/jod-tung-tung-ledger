@@ -233,13 +233,41 @@
     }
   }
 
+  let scanInFlight = false;
+  async function runChecks() {
+    if (scanInFlight) return;
+    scanInFlight = true;
+    try {
+      await checkPendingSharedPhoto();
+      await checkNativeGallery();
+    } finally {
+      scanInFlight = false;
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     buildShell();
     render();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(() => {});
     }
-    checkPendingSharedPhoto();
-    checkNativeGallery();
+    sessionStorage.setItem("last_reload_check", String(Date.now()));
+    runChecks();
+  });
+
+  // Android doesn't reload the page when the app is resumed from the background —
+  // it's the same live WebView coming back to the foreground, still running whatever
+  // JS was already in memory — so DOMContentLoaded never fires again and code changes
+  // never show up. Force a real reload (fetching fresh code) on resume, but not more
+  // than once a minute so quickly switching back and forth doesn't cause flicker.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    const last = Number(sessionStorage.getItem("last_reload_check") || 0);
+    if (Date.now() - last > 60000) {
+      sessionStorage.setItem("last_reload_check", String(Date.now()));
+      location.reload();
+    } else {
+      runChecks();
+    }
   });
 })();

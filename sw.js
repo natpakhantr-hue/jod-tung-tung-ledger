@@ -1,4 +1,4 @@
-const CACHE = "ledger-cache-v3";
+const CACHE = "ledger-cache-v4";
 const ASSETS = [
   "./",
   "index.html",
@@ -53,18 +53,19 @@ self.addEventListener("fetch", (e) => {
 
   if (e.request.method !== "GET") return;
 
+  // Network-first, bypassing the HTTP disk cache too (GitHub Pages sends
+  // max-age=600, which would otherwise let a stale copy slip through for up to
+  // 10 minutes after a deploy) — always fetch the latest app code when online.
+  // Cache is only a fallback for when there's no connection at all.
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const fetchPromise = fetch(e.request)
-        .then((res) => {
-          if (res && res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, clone));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    fetch(e.request, { cache: "no-store" })
+      .then((res) => {
+        if (res && res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, clone));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
