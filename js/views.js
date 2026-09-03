@@ -906,12 +906,12 @@
     if (isNativeApp) {
       const slipAlbumCard = el(`
         <div class="card">
-          <h2>Bank Slip Album</h2>
+          <h2>Bank Slip Albums</h2>
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
-            Auto-scan only checks this one album for new photos — not your whole gallery. Pick the folder your banking app saves transfer slips to (often named after the bank, or "Screenshots").
+            Auto-scan only checks the album(s) you pick here for new photos — not your whole gallery. Select every folder any of your banking apps save transfer slips to (often named after the bank, or "Screenshots"). You can pick more than one.
           </div>
-          <div class="budget-line"><span>Current album</span><span class="amt">${s.slipAlbum ? escapeHtml(s.slipAlbum) : "Not set"}</span></div>
-          <button class="secondary" id="choose-album" style="width:100%;margin-top:10px">Choose Album</button>
+          <div class="budget-line"><span>Current albums</span><span class="amt">${(s.slipAlbums && s.slipAlbums.length) ? escapeHtml(s.slipAlbums.join(", ")) : "Not set"}</span></div>
+          <button class="secondary" id="choose-album" style="width:100%;margin-top:10px">Choose Albums</button>
         </div>
       `);
       slipAlbumCard.querySelector("#choose-album").addEventListener("click", async () => {
@@ -922,15 +922,32 @@
           if (!perm.granted) return App.toast("Photo permission needed to list albums");
           const { albums } = await GalleryScan.listAlbums();
           if (!albums || !albums.length) return App.toast("No albums found");
-          App.openSheet("Choose Bank Slip Album", `
-            <div class="list">${albums.map((a) => `<div class="row-item album-choice" data-name="${escapeHtml(a.name)}" style="cursor:pointer"><div class="main"><div class="title">${escapeHtml(a.name)}</div></div></div>`).join("")}</div>
+          const selected = new Set(DB.getSettings().slipAlbums || []);
+          App.openSheet("Choose Bank Slip Albums", `
+            <div class="list">${albums.map((a) => `<div class="row-item album-choice" data-name="${escapeHtml(a.name)}" style="cursor:pointer"><div class="main"><div class="title">${escapeHtml(a.name)}</div></div><div class="pill ${selected.has(a.name) ? "paid" : "unpaid"}" data-check>${selected.has(a.name) ? "Selected" : ""}</div></div>`).join("")}</div>
+            <div class="sheet-actions"><button class="primary" id="done-albums">Done</button></div>
           `, (body) => {
             body.querySelectorAll(".album-choice").forEach((row) => row.addEventListener("click", () => {
-              DB.updateSettings({ slipAlbum: row.dataset.name });
-              App.closeSheet();
-              App.toast(`Slip album set to "${row.dataset.name}"`);
-              App.render();
+              const name = row.dataset.name;
+              const check = row.querySelector("[data-check]");
+              if (selected.has(name)) {
+                selected.delete(name);
+                check.textContent = "";
+                check.classList.remove("paid");
+                check.classList.add("unpaid");
+              } else {
+                selected.add(name);
+                check.textContent = "Selected";
+                check.classList.remove("unpaid");
+                check.classList.add("paid");
+              }
             }));
+            body.querySelector("#done-albums").addEventListener("click", () => {
+              DB.updateSettings({ slipAlbums: Array.from(selected) });
+              App.closeSheet();
+              App.toast(selected.size ? `Watching ${selected.size} album${selected.size === 1 ? "" : "s"}` : "No albums selected — auto-scan is off");
+              App.render();
+            });
           });
         } catch (e) {
           App.toast("Couldn't list albums: " + e.message);
@@ -944,7 +961,7 @@
         <h2>Scan Slip Photos</h2>
         <div style="font-size:13px;color:var(--text-muted)">
           ${isNativeApp
-            ? "Set your Bank Slip Album above, then just open the app — new slips in that album are read and logged automatically, no confirmation needed."
+            ? "Set your Bank Slip Album(s) above, then just open the app — new slips in those albums are read and logged automatically, no confirmation needed."
             : `Install this app to your Android home screen, then use your phone's <b>Share</b> button on a bank slip photo (from Gallery or your banking app) and choose <b>Ledger</b>. It will read the amount automatically and pre-fill a transaction for you to confirm. iOS Safari doesn't support sharing into web apps, so this only works on Android.`}
         </div>
       </div>

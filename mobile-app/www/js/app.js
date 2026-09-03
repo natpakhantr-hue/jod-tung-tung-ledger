@@ -124,7 +124,7 @@
   // in the user's chosen slip album since last time — could be several if the
   // app's been closed a while — and auto-log any that look like a real slip.
   // Every photo checked is remembered by id so nothing is ever scanned twice
-  // or silently skipped. No popup, ever. Only scans the one configured album,
+  // or silently skipped. No popup, ever. Only scans the configured album(s),
   // never the whole gallery.
   function photoIdFromUri(uri) {
     return uri.split("/").pop();
@@ -136,11 +136,11 @@
     const GalleryScan = window.Capacitor.Plugins && window.Capacitor.Plugins.GalleryScan;
     if (!GalleryScan) return;
 
-    const album = DB.getSettings().slipAlbum;
-    if (!album) {
+    const albums = DB.getSettings().slipAlbums || [];
+    if (!albums.length) {
       if (!localStorage.getItem("slip_album_hint_shown")) {
         localStorage.setItem("slip_album_hint_shown", "1");
-        toast("Set your Bank Slip Album in Settings to enable auto-scan");
+        toast("Set your Bank Slip Album(s) in Settings to enable auto-scan");
       }
       return;
     }
@@ -158,9 +158,21 @@
       // or double-processed even if this timestamp drifts.
       const lastCheck = Number(localStorage.getItem("gallery_last_scan_ts") || 0) || (Date.now() - 7 * 24 * 60 * 60 * 1000);
       const now = Date.now();
-      const { images } = await GalleryScan.getRecentImages({ since: lastCheck, limit: 50, album });
+
+      // The native plugin filters by one album per call, so query each selected
+      // album separately and merge — the same photo could theoretically only be
+      // in one album, but dedupe by uri anyway to be safe.
+      let images = [];
+      for (const album of albums) {
+        const res = await GalleryScan.getRecentImages({ since: lastCheck, limit: 50, album });
+        images = images.concat(res.images || []);
+      }
+      const seenUris = new Set();
+      images = images.filter((img) => (seenUris.has(img.uri) ? false : (seenUris.add(img.uri), true)));
+      images.sort((a, b) => b.dateAdded - a.dateAdded);
+
       localStorage.setItem("gallery_last_scan_ts", String(now));
-      if (!images || !images.length) {
+      if (!images.length) {
         if (isFreshBaseline) localStorage.setItem("gallery_build_id", NATIVE_BUILD_ID);
         return;
       }

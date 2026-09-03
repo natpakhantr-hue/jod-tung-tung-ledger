@@ -46,9 +46,13 @@
       const parsed = JSON.parse(raw);
       // fill in any missing top-level keys for forward-compat
       const d = defaultData();
-      return Object.assign({}, d, parsed, {
-        settings: Object.assign({}, d.settings, parsed.settings || {}),
-      });
+      const mergedSettings = Object.assign({}, d.settings, parsed.settings || {});
+      // migrate legacy single-album setting to the multi-album list
+      if (!mergedSettings.slipAlbums && mergedSettings.slipAlbum) {
+        mergedSettings.slipAlbums = [mergedSettings.slipAlbum];
+      }
+      delete mergedSettings.slipAlbum;
+      return Object.assign({}, d, parsed, { settings: mergedSettings });
     } catch (e) {
       console.error("Failed to load data, resetting.", e);
       const d = defaultData();
