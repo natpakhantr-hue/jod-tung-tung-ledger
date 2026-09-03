@@ -115,17 +115,17 @@
 
   window.addEventListener("hashchange", render);
 
-  // Bump this whenever the native Android build is rebuilt/reinstalled. It resets
-  // the scan baseline so only slips added after that point get auto-logged —
-  // nothing already sitting in the album at install/update time is touched.
-  const NATIVE_BUILD_ID = "android-v3";
-
   // Native-only (Capacitor Android wrapper): on app open, check every new photo
-  // in the user's chosen slip album since last time — could be several if the
+  // in the user's chosen slip album(s) since last time — could be several if the
   // app's been closed a while — and auto-log any that look like a real slip.
   // Every photo checked is remembered by id so nothing is ever scanned twice
   // or silently skipped. No popup, ever. Only scans the configured album(s),
   // never the whole gallery.
+  //
+  // Each album gets its own one-time baseline: the moment an album is newly
+  // selected (a fresh install counts too — every selected album starts
+  // unbaselined), every photo already sitting in it is marked as seen WITHOUT
+  // being logged. Only photos added after that point are ever auto-logged.
   function photoIdFromUri(uri) {
     return uri.split("/").pop();
   }
@@ -150,8 +150,25 @@
       if (!perm.granted) perm = await GalleryScan.requestPhotoPermission();
       if (!perm.granted) return;
 
-      const storedBuildId = localStorage.getItem("gallery_build_id");
-      const isFreshBaseline = storedBuildId !== NATIVE_BUILD_ID;
+      const baselined = DB.getSettings().baselinedAlbums || [];
+      const newAlbums = albums.filter((a) => !baselined.includes(a));
+      const knownAlbums = albums.filter((a) => baselined.includes(a));
+
+      // Any album picked for the first time: baseline it on its own (a wide
+      // "since 0" query so nothing already in it gets treated as new), without
+      // logging anything from it yet.
+      if (newAlbums.length) {
+        for (const album of newAlbums) {
+          const res = await GalleryScan.getRecentImages({ since: 0, limit: 300, album });
+          (res.images || []).forEach((img) => DB.markPhotoScanned(photoIdFromUri(img.uri)));
+        }
+        DB.updateSettings({ baselinedAlbums: baselined.concat(newAlbums) });
+      }
+
+      if (!knownAlbums.length) {
+        localStorage.setItem("gallery_last_scan_ts", String(Date.now()));
+        return;
+      }
 
       // "since" just bounds the query for performance; DB.isPhotoScanned is the
       // real source of truth for what's already been read, so nothing gets missed
@@ -159,11 +176,10 @@
       const lastCheck = Number(localStorage.getItem("gallery_last_scan_ts") || 0) || (Date.now() - 7 * 24 * 60 * 60 * 1000);
       const now = Date.now();
 
-      // The native plugin filters by one album per call, so query each selected
-      // album separately and merge — the same photo could theoretically only be
-      // in one album, but dedupe by uri anyway to be safe.
+      // The native plugin filters by one album per call, so query each already-
+      // baselined album separately and merge.
       let images = [];
-      for (const album of albums) {
+      for (const album of knownAlbums) {
         const res = await GalleryScan.getRecentImages({ since: lastCheck, limit: 50, album });
         images = images.concat(res.images || []);
       }
@@ -172,19 +188,7 @@
       images.sort((a, b) => b.dateAdded - a.dateAdded);
 
       localStorage.setItem("gallery_last_scan_ts", String(now));
-      if (!images.length) {
-        if (isFreshBaseline) localStorage.setItem("gallery_build_id", NATIVE_BUILD_ID);
-        return;
-      }
-
-      // Fresh install, or the app was just updated to a new native build: only
-      // establish the baseline (mark everything currently in the album as seen),
-      // don't retroactively process a backlog.
-      if (isFreshBaseline) {
-        images.forEach((img) => DB.markPhotoScanned(photoIdFromUri(img.uri)));
-        localStorage.setItem("gallery_build_id", NATIVE_BUILD_ID);
-        return;
-      }
+      if (!images.length) return;
 
       const unseen = images.filter((img) => !DB.isPhotoScanned(photoIdFromUri(img.uri))).reverse(); // oldest first
       if (!unseen.length) return;

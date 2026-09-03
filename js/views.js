@@ -924,8 +924,8 @@
           if (!albums || !albums.length) return App.toast("No albums found");
           const selected = new Set(DB.getSettings().slipAlbums || []);
           App.openSheet("Choose Bank Slip Albums", `
-            <div class="list">${albums.map((a) => `<div class="row-item album-choice" data-name="${escapeHtml(a.name)}" style="cursor:pointer"><div class="main"><div class="title">${escapeHtml(a.name)}</div></div><div class="pill ${selected.has(a.name) ? "paid" : "unpaid"}" data-check>${selected.has(a.name) ? "Selected" : ""}</div></div>`).join("")}</div>
-            <div class="sheet-actions"><button class="primary" id="done-albums">Done</button></div>
+            <div class="list" style="max-height:48vh;overflow-y:auto;padding-right:2px">${albums.map((a) => `<div class="row-item album-choice" data-name="${escapeHtml(a.name)}" style="cursor:pointer"><div class="main"><div class="title">${escapeHtml(a.name)}</div></div><div class="pill ${selected.has(a.name) ? "paid" : "unpaid"}" data-check>${selected.has(a.name) ? "Selected" : ""}</div></div>`).join("")}</div>
+            <div class="sheet-actions" style="margin-top:12px"><button class="primary" id="done-albums">Done (<span id="done-count">${selected.size}</span> selected)</button></div>
           `, (body) => {
             body.querySelectorAll(".album-choice").forEach((row) => row.addEventListener("click", () => {
               const name = row.dataset.name;
@@ -941,6 +941,7 @@
                 check.classList.remove("unpaid");
                 check.classList.add("paid");
               }
+              body.querySelector("#done-count").textContent = selected.size;
             }));
             body.querySelector("#done-albums").addEventListener("click", () => {
               DB.updateSettings({ slipAlbums: Array.from(selected) });
