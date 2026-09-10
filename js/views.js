@@ -115,37 +115,8 @@
     const wrap = el(`<div></div>`);
     wrap.appendChild(monthSwitcher(state));
 
-    const recurringIncomes = DB.listRecurringIncomes();
-    if (recurringIncomes.length) {
-      const pending = recurringIncomes.filter((r) => recurringIncomeStatus(r, state.month) !== "received");
-      if (pending.length) {
-        const incomeCard = el(`<div class="card"><h2>Recurring Income</h2></div>`);
-        const list = el(`<div class="list"></div>`);
-        pending.forEach((r) => list.appendChild(recurringIncomeRow(r, state.month)));
-        incomeCard.appendChild(list);
-        wrap.appendChild(incomeCard);
-      }
-    }
-
     const txs = DB.listTransactions().filter((t) => txInMonth(t, state.month));
-    const income = txs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
     const expense = txs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-    const saved = txs.filter((t) => t.type === "saving").reduce((s, t) => s + t.amount, 0);
-    const net = income - expense;
-
-    wrap.appendChild(el(`
-      <div class="card">
-        <h2>This Month</h2>
-        <div class="summary-grid">
-          <div class="stat"><div class="label">Income</div><div class="value income">${formatMoney(income)}</div></div>
-          <div class="stat"><div class="label">Expense</div><div class="value expense">${formatMoney(expense)}</div></div>
-        </div>
-        ${saved > 0 ? `<div class="budget-line"><span>Saved</span><span class="amt saving">${formatMoney(saved)}</span></div>` : ""}
-        <div class="budget-line remaining ${net < 0 ? "negative" : ""}" style="margin-top:10px">
-          <span>Remaining after expenses</span><span class="amt">${formatMoney(net)}</span>
-        </div>
-      </div>
-    `));
 
     // Statement list: day band (date + that day's expense total) -> transaction sub-rows
     const statementCard = el(`
@@ -199,54 +170,6 @@
       statementCard.appendChild(groups);
     }
     wrap.appendChild(statementCard);
-
-    // Category pie chart with monthly-average comparison
-    const catTotals = {};
-    txs.filter((t) => t.type === "expense").forEach((t) => {
-      const c = categoryById(t.categoryId);
-      const key = c ? c.id : "uncategorized";
-      catTotals[key] = (catTotals[key] || 0) + t.amount;
-    });
-    const allExpenseTx = DB.listTransactions().filter((t) => t.type === "expense");
-    const activeMonths = new Set(allExpenseTx.map((t) => t.date.slice(0, 7)));
-    const monthCount = Math.max(1, activeMonths.size);
-    const catData = Object.entries(catTotals).map(([catId, value]) => {
-      const c = catId === "uncategorized" ? null : categoryById(catId);
-      const label = c ? `${c.icon} ${c.name}` : "🏷️ Uncategorized";
-      const histTotal = allExpenseTx
-        .filter((t) => (t.categoryId || "uncategorized") === catId)
-        .reduce((s, t) => s + t.amount, 0);
-      const avg = histTotal / monthCount;
-      const diffPct = avg > 0 ? Math.round(((value - avg) / avg) * 100) : null;
-      let sub = `avg ${formatMoney(avg)}/mo`;
-      let subClass = "";
-      if (diffPct != null && Math.abs(diffPct) >= 1) {
-        subClass = diffPct > 0 ? "up" : "down";
-        sub += ` · ${diffPct > 0 ? "+" : ""}${diffPct}% vs avg`;
-      }
-      return { label, value, sub: `<span class="${subClass}">${sub}</span>` };
-    });
-    wrap.appendChild(el(`<div class="card"><h2>Expense by Category</h2>${Charts.pieChart(catData)}<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Average is calculated across ${monthCount} month${monthCount === 1 ? "" : "s"} of history.</div></div>`));
-
-    // Income & pocket overview
-    const pockets = DB.listPockets();
-    const items = pockets.flatMap((p) => DB.listPocketItems(p.id));
-    const totalPocketCost = items.filter((i) => i.kind !== "saving").reduce((s, i) => s + i.amount, 0);
-    const totalPocketSaving = items.filter((i) => i.kind === "saving").reduce((s, i) => s + i.amount, 0);
-    const remainingAfterPockets = income - totalPocketCost - totalPocketSaving;
-    const spentPct = income > 0 ? Math.min(100, (expense / income) * 100) : 0;
-
-    wrap.appendChild(el(`
-      <div class="card">
-        <h2>Overview</h2>
-        <div class="budget-line"><span>Total Income</span><span class="amt">${formatMoney(income)}</span></div>
-        <div class="budget-line"><span>Pocket fixed costs</span><span class="amt">-${formatMoney(totalPocketCost)}</span></div>
-        ${totalPocketSaving > 0 ? `<div class="budget-line"><span>Pocket savings</span><span class="amt saving">-${formatMoney(totalPocketSaving)}</span></div>` : ""}
-        <div class="budget-line remaining ${remainingAfterPockets < 0 ? "negative" : ""}"><span>Remaining after pockets</span><span class="amt">${formatMoney(remainingAfterPockets)}</span></div>
-        <div class="progress-track"><div class="progress-fill ${income > 0 && expense > income ? "over" : ""}" style="width:${spentPct}%"></div></div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${formatMoney(expense)} spent of ${formatMoney(income)} income</div>
-      </div>
-    `));
 
     return wrap;
   }

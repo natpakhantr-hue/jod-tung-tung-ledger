@@ -1,11 +1,12 @@
 :root {
-  --bg: #f4f5f9;
+  --bg: #eaf4ff;
   --surface: #ffffff;
   --text: #16171d;
   --text-muted: #6b7280;
-  --border: #e5e7eb;
-  --primary: #4f46e5;
+  --border: #dce8f5;
+  --primary: #446580;
   --primary-fg: #ffffff;
+  --accent: #3bd1ff;
   --income: #10b981;
   --expense: #ef4444;
   --warn: #f59e0b;
@@ -26,7 +27,8 @@
     --text: #f0f1f5;
     --text-muted: #9aa0ac;
     --border: #2a2d36;
-    --primary: #6366f1;
+    --primary: #627980;
+    --accent: #3bd1ff;
     --day-band: #627980;
     --day-band-light: #79929c;
   }
@@ -143,16 +145,6 @@ button.secondary {
 button.danger { color: var(--expense); border-color: var(--expense); }
 button.ghost { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; }
 
-.fab {
-  position: fixed;
-  right: max(16px, calc((100vw - 480px)/2 + 16px));
-  bottom: calc(var(--nav-h) + var(--safe-bottom) + 16px);
-  width: 56px; height: 56px; border-radius: 999px;
-  background: var(--primary); color: #fff; border: none;
-  font-size: 28px; line-height: 56px; text-align: center;
-  box-shadow: 0 6px 16px rgba(79,70,229,.4);
-  cursor: pointer; z-index: 20;
-}
 
 nav.bottom-nav {
   position: fixed;
@@ -177,7 +169,12 @@ nav.bottom-nav a {
   font-size: 11px;
 }
 nav.bottom-nav a .ic { font-size: 20px; }
-nav.bottom-nav a.active { color: var(--primary); font-weight: 700; }
+nav.bottom-nav a.active { color: var(--accent); font-weight: 700; }
+nav.bottom-nav #nav-add .ic {
+  background: var(--primary); color: #fff; border-radius: 999px;
+  width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+  font-size: 17px; margin: -4px auto 0;
+}
 
 .list { display: flex; flex-direction: column; gap: 8px; }
 .row-item {

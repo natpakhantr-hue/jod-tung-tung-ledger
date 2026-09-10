@@ -13,10 +13,14 @@
     settings: () => window.Views.settings(state),
   };
 
+  // Stats isn't linked in the bottom nav right now — the panels that used to
+  // live on Home (This Month, Expense by Category, Overview, Recurring Income)
+  // are being relocated to other tabs; the "stats" route/page code is kept as-is
+  // until that's decided, just not reachable from here yet.
   const NAV = [
     { route: "dashboard", icon: "🏠", label: "Home" },
     { route: "pockets", icon: "💼", label: "Pockets" },
-    { route: "stats", icon: "📊", label: "Stats" },
+    { action: "add", icon: "➕", label: "Add" },
     { route: "settings", icon: "⚙️", label: "Settings" },
   ];
 
@@ -34,12 +38,9 @@
     const content = fn(arg);
     if (content) main.appendChild(content);
 
-    document.querySelectorAll("nav.bottom-nav a").forEach((a) => {
+    document.querySelectorAll("nav.bottom-nav a[data-route]").forEach((a) => {
       a.classList.toggle("active", a.dataset.route === name || (name === "pocket" && a.dataset.route === "pockets"));
     });
-
-    const fab = document.getElementById("fab");
-    fab.style.display = name === "dashboard" ? "block" : "none";
 
     window.scrollTo(0, 0);
   }
@@ -103,12 +104,16 @@
         <div class="actions"></div>
       </header>
       <main id="main-content"></main>
-      <button id="fab" class="fab" title="Add transaction">+</button>
       <nav class="bottom-nav">
-        ${NAV.map((n) => `<a href="#/${n.route}" data-route="${n.route}"><span class="ic">${n.icon}</span>${n.label}</a>`).join("")}
+        ${NAV.map((n) =>
+          n.action === "add"
+            ? `<a href="#" id="nav-add"><span class="ic">${n.icon}</span>${n.label}</a>`
+            : `<a href="#/${n.route}" data-route="${n.route}"><span class="ic">${n.icon}</span>${n.label}</a>`
+        ).join("")}
       </nav>
     `;
-    document.getElementById("fab").addEventListener("click", () => {
+    document.getElementById("nav-add").addEventListener("click", (e) => {
+      e.preventDefault();
       window.Views.openTransactionForm(state);
     });
   }
