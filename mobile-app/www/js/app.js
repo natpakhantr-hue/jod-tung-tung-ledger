@@ -13,15 +13,16 @@
     settings: () => window.Views.settings(state),
   };
 
-  // Stats isn't linked in the bottom nav right now — the panels that used to
-  // live on Home (This Month, Expense by Category, Overview, Recurring Income)
-  // are being relocated to other tabs; the "stats" route/page code is kept as-is
-  // until that's decided, just not reachable from here yet.
+  // 5 tabs per the wireframe: Home, Pockets, Add (center), Settings, and a 5th
+  // slot — using Stats for now since that's the natural home for the panels
+  // that got pulled off of Home (This Month, Expense by Category, Overview,
+  // Recurring Income); swap it out once the final placement is decided.
   const NAV = [
     { route: "dashboard", icon: "🏠", label: "Home" },
     { route: "pockets", icon: "💼", label: "Pockets" },
     { action: "add", icon: "➕", label: "Add" },
     { route: "settings", icon: "⚙️", label: "Settings" },
+    { route: "stats", icon: "📊", label: "Stats" },
   ];
 
   function parseHash() {
