@@ -147,32 +147,20 @@
       </div>
     `));
 
-    // Statement list: day band (date + that day's expense total) -> transaction sub-rows
-    const statementCard = el(`
-      <div class="card statement-card">
-        <div class="statement-head"><h2 style="margin:0">Statement</h2><span class="statement-total">${formatMoney(expense)}</span></div>
-      </div>
-    `);
+    // Statement list: day -> category -> amount -> note
+    const statementCard = el(`<div class="card"><h2>Statement</h2></div>`);
     if (!txs.length) {
       statementCard.appendChild(el(`<div class="chart-empty">No transactions this month yet. Tap + to add one.</div>`));
     } else {
       const byDate = {};
       txs.forEach((t) => (byDate[t.date] = byDate[t.date] || []).push(t));
-      const groups = el(`<div class="day-groups"></div>`);
+      const list = el(`<div></div>`);
       Object.keys(byDate)
         .sort((a, b) => (a < b ? 1 : -1))
         .forEach((date) => {
-          const dayTxs = byDate[date];
-          const dayExpense = dayTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-          const group = el(`
-            <div class="day-group">
-              <div class="day-header-row">
-                <span>${formatDateShort(date)}</span>
-                <span>${formatMoney(dayExpense)}</span>
-              </div>
-            </div>
-          `);
-          dayTxs.forEach((t) => {
+          list.appendChild(el(`<div class="section-title">${formatDateShort(date)}</div>`));
+          const dayList = el(`<div class="list"></div>`);
+          byDate[date].forEach((t) => {
             const c = categoryById(t.categoryId);
             const pocket = t.pocketId ? DB.getPocket(t.pocketId) : null;
             const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : "💸";
@@ -181,7 +169,7 @@
             if (t.payee) subParts.push(escapeHtml(t.payee));
             if (t.note) subParts.push(escapeHtml(t.note));
             const row = el(`
-              <div class="day-sub-row">
+              <div class="row-item">
                 <div class="emoji">${c ? c.icon : fallbackIcon}</div>
                 <div class="main">
                   <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.autoLogged ? " 🤖" : ""}</div>
@@ -192,11 +180,11 @@
             `);
             row.style.cursor = "pointer";
             row.addEventListener("click", () => openTransactionForm(state, t));
-            group.appendChild(row);
+            dayList.appendChild(row);
           });
-          groups.appendChild(group);
+          list.appendChild(dayList);
         });
-      statementCard.appendChild(groups);
+      statementCard.appendChild(list);
     }
     wrap.appendChild(statementCard);
 
