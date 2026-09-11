@@ -33,11 +33,17 @@
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   }
 
+  function formatNumber(amount) {
+    const n = Math.abs(Number(amount) || 0);
+    const hasCents = Math.round(n * 100) % 100 !== 0;
+    return n.toLocaleString(undefined, { minimumFractionDigits: hasCents ? 2 : 0, maximumFractionDigits: 2 });
+  }
+
   function formatMoney(amount, currency) {
     const c = currency != null ? currency : (window.DB ? window.DB.getSettings().currency : "$");
     const n = Number(amount) || 0;
     const sign = n < 0 ? "-" : "";
-    return `${sign}${c}${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `${sign}${c}${formatNumber(n)}`;
   }
 
   function formatDateShort(iso) {
@@ -81,6 +87,7 @@
     shiftMonth,
     todayISO,
     formatMoney,
+    formatNumber,
     formatDateShort,
     escapeHtml,
     el,

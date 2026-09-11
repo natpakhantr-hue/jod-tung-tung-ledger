@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const { el, formatMoney, formatDateShort, monthLabel, shiftMonth, todayISO, escapeHtml } = Utils;
+  const { el, formatMoney, formatNumber, formatDateShort, monthLabel, shiftMonth, todayISO, escapeHtml } = Utils;
 
   function setHeader(title, actionsHtml) {
     document.getElementById("page-title").textContent = title;
@@ -117,15 +117,17 @@
 
     const txs = DB.listTransactions().filter((t) => txInMonth(t, state.month));
     const expense = txs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const currency = DB.getSettings().currency;
 
-    // Statement list: day band (date + that day's expense total) -> transaction sub-rows
-    const statementCard = el(`
-      <div class="card statement-card">
-        <div class="statement-head"><h2 style="margin:0">Statement</h2><span class="statement-total">${formatMoney(expense)}</span></div>
+    wrap.appendChild(el(`
+      <div class="statement-head">
+        <div class="eyebrow">Monthly Expense</div>
+        <div class="statement-total">${formatNumber(expense)}<span class="cur">${escapeHtml(currency)}</span></div>
       </div>
-    `);
+    `));
+
     if (!txs.length) {
-      statementCard.appendChild(el(`<div class="chart-empty">No transactions this month yet. Tap + to add one.</div>`));
+      wrap.appendChild(el(`<div class="empty-state"><div class="big">🧾</div><div>No transactions this month yet.</div><div style="font-size:13px;margin-top:4px">Tap + to add one.</div></div>`));
     } else {
       const byDate = {};
       txs.forEach((t) => (byDate[t.date] = byDate[t.date] || []).push(t));
@@ -139,7 +141,7 @@
             <div class="day-group">
               <div class="day-header-row">
                 <span>${formatDateShort(date)}</span>
-                <span>${formatMoney(dayExpense)}</span>
+                <span>${formatNumber(dayExpense)} ${escapeHtml(currency)}</span>
               </div>
             </div>
           `);
@@ -158,7 +160,7 @@
                   <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.autoLogged ? " 🤖" : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
                 </div>
-                <div class="amt ${t.type}">${t.type === "income" ? "+" : "-"}${formatMoney(t.amount)}</div>
+                <div class="amt ${t.type}">${t.type === "income" ? "+" : "-"}${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
               </div>
             `);
             row.style.cursor = "pointer";
@@ -167,9 +169,9 @@
           });
           groups.appendChild(group);
         });
-      statementCard.appendChild(groups);
+      groups.appendChild(el(`<div class="day-groups-spacer"></div>`));
+      wrap.appendChild(groups);
     }
-    wrap.appendChild(statementCard);
 
     return wrap;
   }

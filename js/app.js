@@ -19,10 +19,10 @@
   // Recurring Income); swap it out once the final placement is decided.
   const NAV = [
     { route: "dashboard", icon: "🏠", label: "Home" },
-    { route: "pockets", icon: "💼", label: "Pockets" },
+    { route: "pockets", icon: "💼", label: "Pocket" },
     { action: "add", icon: "➕", label: "Add" },
+    { route: "stats", icon: "🕐", label: "History" },
     { route: "settings", icon: "⚙️", label: "Settings" },
-    { route: "stats", icon: "📊", label: "Stats" },
   ];
 
   function parseHash() {
