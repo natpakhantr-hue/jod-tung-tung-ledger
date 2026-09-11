@@ -63,6 +63,9 @@ header.topbar {
   align-items: center;
   justify-content: space-between;
 }
+header.topbar.compact { padding: 6px 16px 0; min-height: 0; }
+header.topbar.compact h1 { display: none; }
+header.topbar.compact:has(.actions:empty) { padding: 0; }
 header.topbar h1 {
   font-size: 20px;
   margin: 0;
@@ -313,7 +316,7 @@ nav.bottom-nav #nav-add .ic {
 .bar-value { text-align: right; font-weight: 600; }
 
 .month-switch {
-  display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px;
+  display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 18px;
 }
 .month-switch .label { font-weight: 700; font-size: 16px; }
 .month-switch button.icon-btn {

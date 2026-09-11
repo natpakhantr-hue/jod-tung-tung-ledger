@@ -5,6 +5,7 @@
 
   function setHeader(title, actionsHtml) {
     document.getElementById("page-title").textContent = title;
+    document.querySelector("header.topbar").classList.toggle("compact", !title);
     document.querySelector("header.topbar .actions").innerHTML = actionsHtml || "";
   }
 
@@ -111,7 +112,7 @@
 
   // ---------- HOME (statement + budget overview) ----------
   function dashboard(state) {
-    setHeader("Ledger");
+    setHeader("");
     const wrap = el(`<div></div>`);
     wrap.appendChild(monthSwitcher(state));
 
