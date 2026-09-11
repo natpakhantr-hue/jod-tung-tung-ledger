@@ -248,6 +248,7 @@
     if (scanInFlight) return;
     scanInFlight = true;
     try {
+      if (window.Views.runRecurringTransactions()) render();
       await checkPendingSharedPhoto();
       await checkNativeGallery();
     } finally {

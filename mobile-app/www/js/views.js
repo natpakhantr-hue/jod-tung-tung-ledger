@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const { el, formatMoney, formatNumber, formatDateShort, formatDateLong, monthLabel, shiftMonth, todayISO, escapeHtml } = Utils;
+  const { el, formatMoney, formatNumber, formatDateShort, formatDateLong, monthLabel, shiftMonth, todayISO, escapeHtml, pad2 } = Utils;
 
   function setHeader(title, actionsHtml) {
     document.getElementById("page-title").textContent = title;
@@ -346,14 +346,11 @@
         App.closeSheet();
         App.render();
       });
-      const delBtn = body.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this pocket and all its bills?")) {
-          DB.deletePocket(existing.id);
-          App.closeSheet();
-          App.navigate("#/pockets");
-        }
-      });
+      wireDeleteButton(body.querySelector("#delete"), () => {
+        DB.deletePocket(existing.id);
+        App.closeSheet();
+        App.navigate("#/pockets");
+      }, "Tap again to delete");
     });
   }
 
@@ -452,13 +449,11 @@
         App.closeSheet();
         openPocketItemForm(pocket.id, item);
       });
-      body.querySelector("#delete-item").addEventListener("click", () => {
-        if (confirm("Delete this bill?")) {
-          DB.deletePocketItem(item.id);
-          App.closeSheet();
-          App.render();
-        }
-      });
+      wireDeleteButton(body.querySelector("#delete-item"), () => {
+        DB.deletePocketItem(item.id);
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
     });
   }
 
@@ -632,14 +627,107 @@
     saving: "Saving is money you set aside — it won't count as spending in your totals.",
     transfer: "Transfer is money moving between your own accounts/pockets — it won't count as spending or income.",
   };
-  const TYPE_LABELS = { expense: "outcome", income: "income", saving: "saving", transfer: "transfers" };
   const TYPE_ICONS = { expense: "⬆️", income: "⬇️", saving: "🐷", transfer: "🔁" };
+
+  // A small self-contained month-grid calendar popup, used in place of the
+  // native <input type=date> picker — some WebViews (notably the Android
+  // Capacitor wrapper) don't reliably pop up a real calendar UI for it, so
+  // rolling our own guarantees the same picker everywhere.
+  function calendarPanelHtml(idPrefix, title) {
+    return `
+      <div class="tx-panel hidden" id="${idPrefix}-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="${idPrefix}-back">‹</button><span>${title}</span></div>
+        <div class="cal-nav">
+          <button type="button" class="icon-btn" id="${idPrefix}-prev">‹</button>
+          <span class="cal-label" id="${idPrefix}-cal-label"></span>
+          <button type="button" class="icon-btn" id="${idPrefix}-next">›</button>
+        </div>
+        <div class="cal-dow"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+        <div class="cal-grid" id="${idPrefix}-grid"></div>
+      </div>
+    `;
+  }
+
+  // Wires up a calendar panel built by calendarPanelHtml. `getSelectedIso`
+  // supplies the currently-selected date (or null) each time the panel opens
+  // and is redrawn; `onPick(iso)` fires when a day is tapped.
+  function wireCalendarPanel(sheetBody, idPrefix, rowEl, getSelectedIso, onPick) {
+    const panel = sheetBody.querySelector(`#${idPrefix}-panel`);
+    const label = sheetBody.querySelector(`#${idPrefix}-cal-label`);
+    const grid = sheetBody.querySelector(`#${idPrefix}-grid`);
+    let viewDate = new Date(`${getSelectedIso() || todayISO()}T00:00:00`);
+    viewDate.setDate(1);
+
+    function draw() {
+      label.textContent = viewDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+      const y = viewDate.getFullYear();
+      const m = viewDate.getMonth();
+      const startDow = new Date(y, m, 1).getDay();
+      const daysInMonth = new Date(y, m + 1, 0).getDate();
+      const selectedIso = getSelectedIso();
+      const todayIso = todayISO();
+      let html = "";
+      for (let i = 0; i < startDow; i++) html += `<span class="cal-cell empty"></span>`;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const iso = `${y}-${pad2(m + 1)}-${pad2(d)}`;
+        const cls = ["cal-cell"];
+        if (iso === selectedIso) cls.push("selected");
+        if (iso === todayIso) cls.push("today");
+        html += `<button type="button" class="${cls.join(" ")}" data-iso="${iso}">${d}</button>`;
+      }
+      grid.innerHTML = html;
+      grid.querySelectorAll("[data-iso]").forEach((btn) => btn.addEventListener("click", () => onPick(btn.dataset.iso)));
+    }
+
+    sheetBody.querySelector(`#${idPrefix}-prev`).addEventListener("click", () => { viewDate.setMonth(viewDate.getMonth() - 1); draw(); });
+    sheetBody.querySelector(`#${idPrefix}-next`).addEventListener("click", () => { viewDate.setMonth(viewDate.getMonth() + 1); draw(); });
+    sheetBody.querySelector(`#${idPrefix}-back`).addEventListener("click", () => panel.classList.add("hidden"));
+    rowEl.addEventListener("click", () => {
+      viewDate = new Date(`${getSelectedIso() || todayISO()}T00:00:00`);
+      viewDate.setDate(1);
+      draw();
+      sheetBody.querySelectorAll(".tx-panel, .tx-calc-panel").forEach((p) => { if (p !== panel) p.classList.add("hidden"); });
+      panel.classList.remove("hidden");
+    });
+  }
+
+  // window.confirm() is unreliable across WebViews — it silently no-ops in
+  // some (including, per a user report, the Android app wrapper), so every
+  // delete button uses this tap-twice-to-confirm pattern instead.
+  function wireDeleteButton(btn, onConfirm, label) {
+    if (!btn) return;
+    const original = btn.textContent;
+    let confirming = false;
+    let revertTimer;
+    btn.addEventListener("click", () => {
+      if (!confirming) {
+        confirming = true;
+        btn.textContent = label || "Tap again to confirm";
+        revertTimer = setTimeout(() => {
+          confirming = false;
+          btn.textContent = original;
+        }, 3000);
+        return;
+      }
+      clearTimeout(revertTimer);
+      onConfirm();
+    });
+  }
+
+  const RECUR_FREQS = { weekly: "week", biweekly: "2 weeks", monthly: "month" };
+  function recurringLabelText(v) {
+    if (!v) return "Recurring";
+    return `Every ${RECUR_FREQS[v.freq] || v.freq} from ${formatDateLong(v.nextDate)}`;
+  }
 
   function openTransactionForm(state, existing, ocr) {
     ocr = ocr || {};
     const type = { v: existing ? existing.type : "expense" };
     const categoryId = { v: existing ? existing.categoryId : null };
-    const recurring = { v: existing ? (existing.recurring || null) : null };
+    const date = { v: existing ? existing.date : todayISO() };
+    // Old shape was a bare ISO date string; normalize to {freq, nextDate}.
+    const existingRecurring = existing && existing.recurring && typeof existing.recurring === "object" ? existing.recurring : null;
+    const recurring = { v: existingRecurring };
     // Payee isn't shown in the UI anymore, but it's kept as a hidden value so
     // OCR-detected payees (and the category-memory they drive) still work.
     const payee = existing ? (existing.payee || "") : (ocr.payee || "");
@@ -670,9 +758,9 @@
 
       <div class="tx-row" id="tx-date-row">
         <span class="tx-row-icon">🕐</span>
-        <span class="tx-row-text" id="tx-date-label">${formatDateLong(existing ? existing.date : todayISO())}</span>
-        <input type="date" id="f-date" class="tx-hidden-input" value="${existing ? existing.date : todayISO()}" />
+        <span class="tx-row-text" id="tx-date-label">${formatDateLong(date.v)}</span>
       </div>
+      ${calendarPanelHtml("tx-date", "Select date")}
 
       <div class="tx-row tx-amount-row" id="tx-amount-row">
         <span class="tx-row-icon tx-icon-badge type-${type.v}" id="tx-type-icon">${TYPE_ICONS[type.v]}</span>
@@ -698,8 +786,25 @@
       </div>
 
       <div class="tx-row" id="tx-recurring-row">
-        <span class="tx-row-text" id="tx-recurring-label">${recurring.v ? "Repeats from " + formatDateLong(recurring.v) : "Recurring"}</span>
-        <input type="date" id="f-recurring" class="tx-hidden-input" value="${recurring.v || ""}" />
+        <span class="tx-row-icon">🔁</span>
+        <span class="tx-row-text" id="tx-recurring-label">${recurringLabelText(recurring.v)}</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="tx-recurring-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="tx-recurring-back">‹</button><span>Recurring</span></div>
+        <div class="seg tx-type-seg" id="tx-freq-seg">
+          <button type="button" class="freq-choice" data-v="weekly">Weekly</button>
+          <button type="button" class="freq-choice" data-v="biweekly">2 weeks</button>
+          <button type="button" class="freq-choice" data-v="monthly">Monthly</button>
+        </div>
+        <div class="cal-nav">
+          <button type="button" class="icon-btn" id="tx-recurring-prev">‹</button>
+          <span class="cal-label" id="tx-recurring-cal-label"></span>
+          <button type="button" class="icon-btn" id="tx-recurring-next">›</button>
+        </div>
+        <div class="cal-dow"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+        <div class="cal-grid" id="tx-recurring-grid"></div>
+        <button type="button" class="secondary danger tx-recurring-clear" id="tx-recurring-clear">Turn off recurring</button>
       </div>
 
       <div class="sheet-actions">
@@ -735,15 +840,42 @@
       amountInput.addEventListener("input", syncAmountDisplay);
       syncAmountDisplay();
 
-      // Date row + Recurring row: an invisible native date input sits on top
-      // of the row so tapping anywhere opens the real picker; the row text is
-      // just a formatted mirror of its value.
-      sheetBody.querySelector("#f-date").addEventListener("change", (e) => {
-        sheetBody.querySelector("#tx-date-label").textContent = formatDateLong(e.target.value || todayISO());
+      // Date row: opens a custom calendar popup (a native <input type=date>
+      // picker isn't reliable across WebViews, notably the Android app).
+      const dateLabel = sheetBody.querySelector("#tx-date-label");
+      wireCalendarPanel(sheetBody, "tx-date", sheetBody.querySelector("#tx-date-row"), () => date.v, (iso) => {
+        date.v = iso;
+        dateLabel.textContent = formatDateLong(iso);
+        sheetBody.querySelector("#tx-date-panel").classList.add("hidden");
       });
-      sheetBody.querySelector("#f-recurring").addEventListener("change", (e) => {
-        recurring.v = e.target.value || null;
-        sheetBody.querySelector("#tx-recurring-label").textContent = recurring.v ? "Repeats from " + formatDateLong(recurring.v) : "Recurring";
+      // Lets OCR (outside this closure) push a detected date into the same state.
+      sheetBody.__setDate = (iso) => {
+        date.v = iso;
+        dateLabel.textContent = formatDateLong(iso);
+      };
+
+      // Recurring row: same calendar popup, plus a frequency choice. Picking a
+      // day finalizes both; "Turn off recurring" clears it.
+      const recurringLabel = sheetBody.querySelector("#tx-recurring-label");
+      let freqChoice = (recurring.v && recurring.v.freq) || "monthly";
+      const freqButtons = sheetBody.querySelectorAll("#tx-freq-seg .freq-choice");
+      function paintFreqButtons() {
+        freqButtons.forEach((b) => b.classList.toggle("active", b.dataset.v === freqChoice));
+      }
+      freqButtons.forEach((b) => b.addEventListener("click", () => {
+        freqChoice = b.dataset.v;
+        paintFreqButtons();
+      }));
+      paintFreqButtons();
+      wireCalendarPanel(sheetBody, "tx-recurring", sheetBody.querySelector("#tx-recurring-row"), () => recurring.v && recurring.v.nextDate, (iso) => {
+        recurring.v = { freq: freqChoice, nextDate: iso };
+        recurringLabel.textContent = recurringLabelText(recurring.v);
+        sheetBody.querySelector("#tx-recurring-panel").classList.add("hidden");
+      });
+      sheetBody.querySelector("#tx-recurring-clear").addEventListener("click", () => {
+        recurring.v = null;
+        recurringLabel.textContent = recurringLabelText(null);
+        sheetBody.querySelector("#tx-recurring-panel").classList.add("hidden");
       });
 
       // Category row: tap to swap the main rows out for a picker panel.
@@ -787,12 +919,11 @@
 
       sheetBody.querySelector("#save").addEventListener("click", () => {
         const amount = readAmountValue(amountInput);
-        const date = sheetBody.querySelector("#f-date").value || todayISO();
         if (!amount || isNaN(amount)) return App.toast("Enter an amount");
         const payload = {
           type: type.v,
           amount,
-          date,
+          date: date.v,
           categoryId: categoryId.v,
           payee: sheetBody.dataset.payee || "",
           note: sheetBody.querySelector("#f-note").value.trim(),
@@ -807,16 +938,14 @@
         activeTxSheetBody = null;
         App.closeSheet();
         App.render();
+        runRecurringTransactions();
       });
-      const delBtn = sheetBody.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this transaction?")) {
-          DB.deleteTransaction(existing.id);
-          activeTxSheetBody = null;
-          App.closeSheet();
-          App.render();
-        }
-      });
+      wireDeleteButton(sheetBody.querySelector("#delete"), () => {
+        DB.deleteTransaction(existing.id);
+        activeTxSheetBody = null;
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
     }
   }
 
@@ -828,10 +957,8 @@
       amountInput.value = result.amount;
       amountInput.dispatchEvent(new Event("input"));
     }
-    if (result.date) {
-      const dateInput = activeTxSheetBody.querySelector("#f-date");
-      dateInput.value = result.date;
-      dateInput.dispatchEvent(new Event("change"));
+    if (result.date && activeTxSheetBody.__setDate) {
+      activeTxSheetBody.__setDate(result.date);
     }
     if (result.payee) {
       activeTxSheetBody.dataset.payee = result.payee;
@@ -849,6 +976,47 @@
         statusEl.textContent = "Couldn't auto-detect the amount — please enter it manually.";
       }
     }
+  }
+
+  function addRecurInterval(iso, freq) {
+    const d = new Date(iso + "T00:00:00");
+    if (freq === "weekly") d.setDate(d.getDate() + 7);
+    else if (freq === "biweekly") d.setDate(d.getDate() + 14);
+    else d.setMonth(d.getMonth() + 1); // monthly (also the fallback for unknown freqs)
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+
+  // Runs on app open (and right after saving a transaction) — the app has no
+  // background process, so "automatic" recurring transactions only actually
+  // get created the next time someone has the app open. For each transaction
+  // with a recurring rule whose next-due date has arrived, logs a new
+  // transaction for that date and advances the rule to the following one;
+  // loops (capped) to catch up if the app wasn't opened for a while.
+  function runRecurringTransactions() {
+    const today = todayISO();
+    let loggedAny = false;
+    DB.listTransactions().forEach((t) => {
+      if (!t.recurring || !t.recurring.nextDate) return;
+      let rule = t.recurring;
+      let guard = 0;
+      while (rule.nextDate <= today && guard < 104) {
+        const dueDate = rule.nextDate;
+        DB.addTransaction({
+          date: dueDate,
+          type: t.type,
+          amount: t.amount,
+          categoryId: t.categoryId,
+          payee: t.payee,
+          note: t.note,
+          autoLogged: true,
+        });
+        rule = { freq: rule.freq, nextDate: addRecurInterval(dueDate, rule.freq) };
+        guard++;
+        loggedAny = true;
+      }
+      if (guard > 0) DB.updateTransaction(t.id, { recurring: rule });
+    });
+    return loggedAny;
   }
 
   function blobToResizedDataUrl(blob, maxW) {
@@ -1124,13 +1292,11 @@
     dataCard.querySelector("#export-btn").addEventListener("click", exportData);
     dataCard.querySelector("#import-btn").addEventListener("click", () => dataCard.querySelector("#import-file").click());
     dataCard.querySelector("#import-file").addEventListener("change", importData);
-    dataCard.querySelector("#reset-btn").addEventListener("click", () => {
-      if (confirm("This will permanently delete all data. Continue?")) {
-        DB.reset();
-        App.toast("All data reset");
-        App.navigate("#/dashboard");
-      }
-    });
+    wireDeleteButton(dataCard.querySelector("#reset-btn"), () => {
+      DB.reset();
+      App.toast("All data reset");
+      App.navigate("#/dashboard");
+    }, "Tap again to erase everything");
     wrap.appendChild(dataCard);
 
     return wrap;
@@ -1172,14 +1338,11 @@
         App.closeSheet();
         App.render();
       });
-      const delBtn = body.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this recurring income?")) {
-          DB.deleteRecurringIncome(existing.id);
-          App.closeSheet();
-          App.render();
-        }
-      });
+      wireDeleteButton(body.querySelector("#delete"), () => {
+        DB.deleteRecurringIncome(existing.id);
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
     });
   }
 
@@ -1248,14 +1411,11 @@
         App.closeSheet();
         App.render();
       });
-      const delBtn = body.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this category?")) {
-          DB.deleteCategory(existing.id);
-          App.closeSheet();
-          App.render();
-        }
-      });
+      wireDeleteButton(body.querySelector("#delete"), () => {
+        DB.deleteCategory(existing.id);
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
     });
   }
 
@@ -1269,5 +1429,6 @@
     handleSharedPhoto,
     autoLogSlip,
     blobToResizedDataUrl,
+    runRecurringTransactions,
   };
 })();
