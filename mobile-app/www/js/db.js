@@ -230,6 +230,7 @@
         pocketItemId: tx.pocketItemId || null,
         receiptImage: tx.receiptImage || null,
         payee: tx.payee || "",
+        recurring: tx.recurring || null,
         autoLogged: !!tx.autoLogged,
       };
       data.transactions.push(t);

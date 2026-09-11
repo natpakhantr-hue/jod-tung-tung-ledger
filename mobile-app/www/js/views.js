@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const { el, formatMoney, formatNumber, formatDateShort, monthLabel, shiftMonth, todayISO, escapeHtml } = Utils;
+  const { el, formatMoney, formatNumber, formatDateShort, formatDateLong, monthLabel, shiftMonth, todayISO, escapeHtml } = Utils;
 
   function setHeader(title, actionsHtml) {
     document.getElementById("page-title").textContent = title;
@@ -608,6 +608,7 @@
           v = v + k;
         }
         inputEl.value = v;
+        inputEl.dispatchEvent(new Event("input"));
       });
     });
     inputEl.addEventListener("input", () => {
@@ -631,14 +632,18 @@
     saving: "Saving is money you set aside — it won't count as spending in your totals.",
     transfer: "Transfer is money moving between your own accounts/pockets — it won't count as spending or income.",
   };
+  const TYPE_LABELS = { expense: "outcome", income: "income", saving: "saving", transfer: "transfers" };
+  const TYPE_ICONS = { expense: "⬆️", income: "⬇️", saving: "🐷", transfer: "🔁" };
 
   function openTransactionForm(state, existing, ocr) {
     ocr = ocr || {};
     const type = { v: existing ? existing.type : "expense" };
     const categoryId = { v: existing ? existing.categoryId : null };
+    const recurring = { v: existing ? (existing.recurring || null) : null };
     // Payee isn't shown in the UI anymore, but it's kept as a hidden value so
     // OCR-detected payees (and the category-memory they drive) still work.
     const payee = existing ? (existing.payee || "") : (ocr.payee || "");
+    const currency = DB.getSettings().currency;
 
     function categoryChips() {
       return DB.listCategories(type.v)
@@ -651,24 +656,52 @@
       ? `<div class="receipt-preview"><img src="${receiptImage}" alt="Receipt" />${ocr.scanning ? `<div class="ocr-status" id="ocr-status">🔍 Scanning photo for the amount…</div>` : ""}</div>`
       : "";
 
-    App.openSheet(existing ? "Edit Transaction" : "Add Transaction", `
+    App.openSheet(
+      `<div class="tx-sheet-head"><span>${existing ? "Edit transaction" : "Add transaction"}</span><button type="button" id="tx-close" class="tx-close-btn" aria-label="Close">&times;</button></div>`,
+      `
       ${receiptHtml}
-      <div class="field">
-        <div class="seg seg-4">
-          <button type="button" class="type-choice ${type.v === "expense" ? "active expense" : ""}" data-v="expense">Expense</button>
-          <button type="button" class="type-choice ${type.v === "income" ? "active income" : ""}" data-v="income">Income</button>
-          <button type="button" class="type-choice ${type.v === "saving" ? "active saving" : ""}" data-v="saving">Saving</button>
-          <button type="button" class="type-choice ${type.v === "transfer" ? "active transfer" : ""}" data-v="transfer">Transfer</button>
-        </div>
-        <div id="type-hint" style="font-size:11.5px;color:var(--text-muted);margin-top:5px">${TYPE_HINTS[type.v] || ""}</div>
+      <div class="seg seg-4 tx-type-seg">
+        <button type="button" class="type-choice ${type.v === "expense" ? "active" : ""}" data-v="expense">outcome</button>
+        <button type="button" class="type-choice ${type.v === "income" ? "active" : ""}" data-v="income">income</button>
+        <button type="button" class="type-choice ${type.v === "saving" ? "active" : ""}" data-v="saving">saving</button>
+        <button type="button" class="type-choice ${type.v === "transfer" ? "active" : ""}" data-v="transfer">transfers</button>
       </div>
-      <div class="field">
-        <label>Amount</label>
+      <div id="type-hint" class="type-hint">${TYPE_HINTS[type.v] || ""}</div>
+
+      <div class="tx-row" id="tx-date-row">
+        <span class="tx-row-icon">🕐</span>
+        <span class="tx-row-text" id="tx-date-label">${formatDateLong(existing ? existing.date : todayISO())}</span>
+        <input type="date" id="f-date" class="tx-hidden-input" value="${existing ? existing.date : todayISO()}" />
+      </div>
+
+      <div class="tx-row tx-amount-row" id="tx-amount-row">
+        <span class="tx-row-icon tx-icon-badge type-${type.v}" id="tx-type-icon">${TYPE_ICONS[type.v]}</span>
+        <span class="tx-row-text">Amount</span>
+        <span class="tx-row-value" id="f-amount-value">0 ${currency}</span>
+      </div>
+      <div class="tx-calc-panel hidden" id="tx-calc-panel">
         ${calculatorHtml("f-amount", existing ? existing.amount : "")}
       </div>
-      <div class="field"><label>Date</label><input type="date" id="f-date" value="${existing ? existing.date : todayISO()}" /></div>
-      <div class="field"><label>Category</label><div class="chip-grid" id="f-cats">${categoryChips()}</div></div>
-      <div class="field"><label>Note (optional)</label><textarea id="f-note">${existing ? escapeHtml(existing.note || "") : (ocr.receiptImage ? "Imported from slip photo" : "")}</textarea></div>
+
+      <div class="tx-row" id="tx-category-row">
+        <span class="tx-row-icon tx-icon-badge tx-cat-badge" id="tx-cat-icon">🏷️</span>
+        <span class="tx-row-text" id="tx-cat-label">category</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="tx-cat-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="tx-cat-back">‹</button><span>Select category</span></div>
+        <div class="chip-grid" id="f-cats">${categoryChips()}</div>
+      </div>
+
+      <div class="tx-row tx-note-row">
+        <input type="text" id="f-note" class="tx-note-input" placeholder="note" value="${existing ? escapeHtml(existing.note || "") : (ocr.receiptImage ? "Imported from slip photo" : "")}" />
+      </div>
+
+      <div class="tx-row" id="tx-recurring-row">
+        <span class="tx-row-text" id="tx-recurring-label">${recurring.v ? "Repeats from " + formatDateLong(recurring.v) : "Recurring"}</span>
+        <input type="date" id="f-recurring" class="tx-hidden-input" value="${recurring.v || ""}" />
+      </div>
+
       <div class="sheet-actions">
         ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
         <button class="primary" id="save">Save</button>
@@ -680,7 +713,52 @@
       if (receiptImage) sheetBody.dataset.receiptImage = receiptImage;
       sheetBody.dataset.payee = payee;
 
-      wireCalculator(sheetBody, sheetBody.querySelector("#f-amount"));
+      document.getElementById("tx-close").addEventListener("click", () => {
+        activeTxSheetBody = null;
+        App.closeSheet();
+      });
+
+      // Amount row: tap to reveal the calculator; keep the row's own display
+      // (and the type-colored icon badge) in sync with whatever it computes.
+      const amountRow = sheetBody.querySelector("#tx-amount-row");
+      const calcPanel = sheetBody.querySelector("#tx-calc-panel");
+      const amountInput = sheetBody.querySelector("#f-amount");
+      const amountValueEl = sheetBody.querySelector("#f-amount-value");
+      function syncAmountDisplay() {
+        amountValueEl.textContent = `${amountInput.value || "0"} ${currency}`;
+      }
+      amountRow.addEventListener("click", () => {
+        calcPanel.classList.toggle("hidden");
+        sheetBody.querySelector("#tx-cat-panel").classList.add("hidden");
+      });
+      wireCalculator(sheetBody, amountInput);
+      amountInput.addEventListener("input", syncAmountDisplay);
+      syncAmountDisplay();
+
+      // Date row + Recurring row: an invisible native date input sits on top
+      // of the row so tapping anywhere opens the real picker; the row text is
+      // just a formatted mirror of its value.
+      sheetBody.querySelector("#f-date").addEventListener("change", (e) => {
+        sheetBody.querySelector("#tx-date-label").textContent = formatDateLong(e.target.value || todayISO());
+      });
+      sheetBody.querySelector("#f-recurring").addEventListener("change", (e) => {
+        recurring.v = e.target.value || null;
+        sheetBody.querySelector("#tx-recurring-label").textContent = recurring.v ? "Repeats from " + formatDateLong(recurring.v) : "Recurring";
+      });
+
+      // Category row: tap to swap the main rows out for a picker panel.
+      const catRow = sheetBody.querySelector("#tx-category-row");
+      const catPanel = sheetBody.querySelector("#tx-cat-panel");
+      function updateCatRow() {
+        const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+        sheetBody.querySelector("#tx-cat-icon").textContent = cat ? cat.icon : "🏷️";
+        sheetBody.querySelector("#tx-cat-label").textContent = cat ? cat.name : "category";
+      }
+      catRow.addEventListener("click", () => {
+        catPanel.classList.remove("hidden");
+        calcPanel.classList.add("hidden");
+      });
+      sheetBody.querySelector("#tx-cat-back").addEventListener("click", () => catPanel.classList.add("hidden"));
 
       function refreshCats() {
         sheetBody.querySelector("#f-cats").innerHTML = categoryChips();
@@ -688,20 +766,27 @@
           categoryId.v = b.dataset.v;
           sheetBody.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
           b.classList.add("active");
+          updateCatRow();
+          catPanel.classList.add("hidden");
         }));
       }
       sheetBody.querySelectorAll(".type-choice").forEach((b) => b.addEventListener("click", () => {
         type.v = b.dataset.v;
         categoryId.v = null;
-        sheetBody.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving", "transfer"));
-        b.classList.add("active", type.v);
+        sheetBody.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
         sheetBody.querySelector("#type-hint").textContent = TYPE_HINTS[type.v] || "";
+        const icon = sheetBody.querySelector("#tx-type-icon");
+        icon.textContent = TYPE_ICONS[type.v];
+        icon.className = `tx-row-icon tx-icon-badge type-${type.v}`;
         refreshCats();
+        updateCatRow();
       }));
       refreshCats();
+      updateCatRow();
 
       sheetBody.querySelector("#save").addEventListener("click", () => {
-        const amount = readAmountValue(sheetBody.querySelector("#f-amount"));
+        const amount = readAmountValue(amountInput);
         const date = sheetBody.querySelector("#f-date").value || todayISO();
         if (!amount || isNaN(amount)) return App.toast("Enter an amount");
         const payload = {
@@ -712,6 +797,7 @@
           payee: sheetBody.dataset.payee || "",
           note: sheetBody.querySelector("#f-note").value.trim(),
           receiptImage: sheetBody.dataset.receiptImage || null,
+          recurring: recurring.v || null,
         };
         if (existing) {
           DB.updateTransaction(existing.id, payload);
@@ -738,10 +824,14 @@
     if (!activeTxSheetBody || !document.body.contains(activeTxSheetBody)) return;
     const statusEl = activeTxSheetBody.querySelector("#ocr-status");
     if (result.amount) {
-      activeTxSheetBody.querySelector("#f-amount").value = result.amount;
+      const amountInput = activeTxSheetBody.querySelector("#f-amount");
+      amountInput.value = result.amount;
+      amountInput.dispatchEvent(new Event("input"));
     }
     if (result.date) {
-      activeTxSheetBody.querySelector("#f-date").value = result.date;
+      const dateInput = activeTxSheetBody.querySelector("#f-date");
+      dateInput.value = result.date;
+      dateInput.dispatchEvent(new Event("change"));
     }
     if (result.payee) {
       activeTxSheetBody.dataset.payee = result.payee;

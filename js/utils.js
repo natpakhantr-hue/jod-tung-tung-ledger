@@ -52,6 +52,14 @@
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
 
+  const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  // Fixed "D MMM YYYY" order regardless of locale, to match the design mockup.
+  function formatDateLong(iso) {
+    const d = new Date(iso + "T00:00:00");
+    if (isNaN(d.getTime())) return iso;
+    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  }
+
   function escapeHtml(str) {
     return String(str == null ? "" : str).replace(/[&<>"']/g, (c) => ({
       "&": "&amp;",
@@ -89,6 +97,7 @@
     formatMoney,
     formatNumber,
     formatDateShort,
+    formatDateLong,
     escapeHtml,
     el,
     daysInMonth,
