@@ -149,7 +149,8 @@
           dayTxs.forEach((t) => {
             const c = categoryById(t.categoryId);
             const pocket = t.pocketId ? DB.getPocket(t.pocketId) : null;
-            const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : "💸";
+            const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : t.type === "transfer" ? "🔁" : "💸";
+            const amtSign = t.type === "income" ? "+" : t.type === "transfer" ? "" : "-";
             const subParts = [];
             if (pocket) subParts.push(escapeHtml(pocket.name));
             if (t.payee) subParts.push(escapeHtml(t.payee));
@@ -161,7 +162,7 @@
                   <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.autoLogged ? " 🤖" : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
                 </div>
-                <div class="amt ${t.type}">${t.type === "income" ? "+" : "-"}${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
+                <div class="amt ${t.type}">${amtSign}${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
               </div>
             `);
             row.style.cursor = "pointer";
@@ -536,11 +537,108 @@
   // ---------- TRANSACTION FORM (with optional receipt/OCR pre-fill) ----------
   let activeTxSheetBody = null;
 
+  // Small left-to-right calculator: numbers separated by + - × ÷, with × ÷
+  // applied immediately (proper precedence) and + - terms summed at the end.
+  // No parentheses — this is a quick "50+89" style helper, not a full calculator.
+  function evalCalcExpr(expr) {
+    const tokens = expr.match(/(\d+\.?\d*|[+\-×÷])/g);
+    if (!tokens || !tokens.length || isNaN(parseFloat(tokens[0]))) return null;
+    let result = parseFloat(tokens[0]);
+    let i = 1;
+    while (i < tokens.length - 1) {
+      const op = tokens[i];
+      const num = parseFloat(tokens[i + 1]);
+      if (isNaN(num)) break;
+      if (op === "×") result *= num;
+      else if (op === "÷") result = num !== 0 ? result / num : result;
+      else if (op === "+") result += num;
+      else if (op === "-") result -= num;
+      i += 2;
+    }
+    return result;
+  }
+
+  function calculatorHtml(id, initialValue) {
+    return `
+      <input type="text" id="${id}" class="amount-display" inputmode="none" placeholder="0" autocomplete="off"
+        value="${initialValue != null && initialValue !== "" ? initialValue : ""}" />
+      <div class="calc-grid">
+        <button type="button" class="calc-key" data-k="7">7</button>
+        <button type="button" class="calc-key" data-k="8">8</button>
+        <button type="button" class="calc-key" data-k="9">9</button>
+        <button type="button" class="calc-key op" data-k="÷">÷</button>
+        <button type="button" class="calc-key" data-k="4">4</button>
+        <button type="button" class="calc-key" data-k="5">5</button>
+        <button type="button" class="calc-key" data-k="6">6</button>
+        <button type="button" class="calc-key op" data-k="×">×</button>
+        <button type="button" class="calc-key" data-k="1">1</button>
+        <button type="button" class="calc-key" data-k="2">2</button>
+        <button type="button" class="calc-key" data-k="3">3</button>
+        <button type="button" class="calc-key op" data-k="-">−</button>
+        <button type="button" class="calc-key" data-k="0">0</button>
+        <button type="button" class="calc-key" data-k=".">.</button>
+        <button type="button" class="calc-key fn" data-k="back">⌫</button>
+        <button type="button" class="calc-key op" data-k="+">+</button>
+        <button type="button" class="calc-key fn wide" data-k="clear">C</button>
+        <button type="button" class="calc-key eq wide" data-k="=">=</button>
+      </div>
+    `;
+  }
+
+  function wireCalculator(container, inputEl) {
+    container.querySelectorAll(".calc-key").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.k;
+        let v = inputEl.value;
+        if (k === "clear") {
+          v = "";
+        } else if (k === "back") {
+          v = v.slice(0, -1);
+        } else if (k === "=") {
+          const result = evalCalcExpr(v);
+          if (result != null && isFinite(result)) v = String(Math.round(result * 100) / 100);
+        } else if (k === "+" || k === "-" || k === "×" || k === "÷") {
+          if (!v) return; // can't lead with an operator
+          v = /[+\-×÷]$/.test(v) ? v.slice(0, -1) + k : v + k;
+        } else if (k === ".") {
+          const lastSegment = v.split(/[+\-×÷]/).pop();
+          if (lastSegment.includes(".")) return;
+          v = v + k;
+        } else {
+          v = v + k;
+        }
+        inputEl.value = v;
+      });
+    });
+    inputEl.addEventListener("input", () => {
+      inputEl.value = inputEl.value.replace(/[^0-9+\-×÷.*/]/g, "").replace(/\*/g, "×").replace(/\//g, "÷");
+    });
+  }
+
+  // Reads the amount field's final numeric value, evaluating an unfinished
+  // expression (e.g. "50+89") automatically if the user never pressed "=".
+  function readAmountValue(inputEl) {
+    const v = inputEl.value.trim();
+    if (!v) return NaN;
+    if (/[+\-×÷]/.test(v)) {
+      const result = evalCalcExpr(v);
+      return result != null ? result : NaN;
+    }
+    return parseFloat(v);
+  }
+
+  const TYPE_HINTS = {
+    saving: "Saving is money you set aside — it won't count as spending in your totals.",
+    transfer: "Transfer is money moving between your own accounts/pockets — it won't count as spending or income.",
+  };
+
   function openTransactionForm(state, existing, ocr) {
     ocr = ocr || {};
     const type = { v: existing ? existing.type : "expense" };
     const categoryId = { v: existing ? existing.categoryId : null };
-    const pockets = DB.listPockets();
+    // Payee isn't shown in the UI anymore, but it's kept as a hidden value so
+    // OCR-detected payees (and the category-memory they drive) still work.
+    const payee = existing ? (existing.payee || "") : (ocr.payee || "");
 
     function categoryChips() {
       return DB.listCategories(type.v)
@@ -556,24 +654,20 @@
     App.openSheet(existing ? "Edit Transaction" : "Add Transaction", `
       ${receiptHtml}
       <div class="field">
-        <div class="seg">
+        <div class="seg seg-4">
           <button type="button" class="type-choice ${type.v === "expense" ? "active expense" : ""}" data-v="expense">Expense</button>
           <button type="button" class="type-choice ${type.v === "income" ? "active income" : ""}" data-v="income">Income</button>
           <button type="button" class="type-choice ${type.v === "saving" ? "active saving" : ""}" data-v="saving">Saving</button>
+          <button type="button" class="type-choice ${type.v === "transfer" ? "active transfer" : ""}" data-v="transfer">Transfer</button>
         </div>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:5px">Saving is money you set aside — it won't count as spending in your totals.</div>
+        <div id="type-hint" style="font-size:11.5px;color:var(--text-muted);margin-top:5px">${TYPE_HINTS[type.v] || ""}</div>
       </div>
-      <div class="field"><label>Amount</label><input type="number" id="f-amount" inputmode="decimal" value="${existing ? existing.amount : ""}" /></div>
+      <div class="field">
+        <label>Amount</label>
+        ${calculatorHtml("f-amount", existing ? existing.amount : "")}
+      </div>
       <div class="field"><label>Date</label><input type="date" id="f-date" value="${existing ? existing.date : todayISO()}" /></div>
       <div class="field"><label>Category</label><div class="chip-grid" id="f-cats">${categoryChips()}</div></div>
-      <div class="field"><label>Pocket (optional)</label>
-        <select id="f-pocket">
-          <option value="">None</option>
-          ${pockets.map((p) => `<option value="${p.id}" ${existing && existing.pocketId === p.id ? "selected" : ""}>${p.icon} ${escapeHtml(p.name)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field"><label>Payee / Recipient (optional)</label><input type="text" id="f-payee" value="${existing ? escapeHtml(existing.payee || "") : escapeHtml(ocr.payee || "")}" placeholder="e.g. 7-Eleven" /><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Future slips from the same payee will reuse whatever category you pick here.</div></div>
-      <div class="field"><label>Tag (optional)</label><input type="text" id="f-tag" value="${existing ? escapeHtml(existing.tag || "") : ""}" placeholder="e.g. groceries" /></div>
       <div class="field"><label>Note (optional)</label><textarea id="f-note">${existing ? escapeHtml(existing.note || "") : (ocr.receiptImage ? "Imported from slip photo" : "")}</textarea></div>
       <div class="sheet-actions">
         ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
@@ -584,6 +678,9 @@
     function wire(sheetBody) {
       activeTxSheetBody = sheetBody;
       if (receiptImage) sheetBody.dataset.receiptImage = receiptImage;
+      sheetBody.dataset.payee = payee;
+
+      wireCalculator(sheetBody, sheetBody.querySelector("#f-amount"));
 
       function refreshCats() {
         sheetBody.querySelector("#f-cats").innerHTML = categoryChips();
@@ -596,24 +693,23 @@
       sheetBody.querySelectorAll(".type-choice").forEach((b) => b.addEventListener("click", () => {
         type.v = b.dataset.v;
         categoryId.v = null;
-        sheetBody.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving"));
+        sheetBody.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving", "transfer"));
         b.classList.add("active", type.v);
+        sheetBody.querySelector("#type-hint").textContent = TYPE_HINTS[type.v] || "";
         refreshCats();
       }));
       refreshCats();
 
       sheetBody.querySelector("#save").addEventListener("click", () => {
-        const amount = Number(sheetBody.querySelector("#f-amount").value);
+        const amount = readAmountValue(sheetBody.querySelector("#f-amount"));
         const date = sheetBody.querySelector("#f-date").value || todayISO();
-        if (!amount) return App.toast("Enter an amount");
+        if (!amount || isNaN(amount)) return App.toast("Enter an amount");
         const payload = {
           type: type.v,
           amount,
           date,
           categoryId: categoryId.v,
-          pocketId: sheetBody.querySelector("#f-pocket").value || null,
-          payee: sheetBody.querySelector("#f-payee").value.trim(),
-          tag: sheetBody.querySelector("#f-tag").value.trim(),
+          payee: sheetBody.dataset.payee || "",
           note: sheetBody.querySelector("#f-note").value.trim(),
           receiptImage: sheetBody.dataset.receiptImage || null,
         };
@@ -648,7 +744,7 @@
       activeTxSheetBody.querySelector("#f-date").value = result.date;
     }
     if (result.payee) {
-      activeTxSheetBody.querySelector("#f-payee").value = result.payee;
+      activeTxSheetBody.dataset.payee = result.payee;
       const rememberedCat = DB.findCategoryForPayee(result.payee);
       if (rememberedCat) {
         const chip = activeTxSheetBody.querySelector(`.cat-choice[data-v="${rememberedCat}"]`);
@@ -907,7 +1003,7 @@
     `));
 
     const catCard = el(`<div class="card"><h2>Categories</h2></div>`);
-    ["income", "expense", "saving"].forEach((t) => {
+    ["income", "expense", "saving", "transfer"].forEach((t) => {
       catCard.appendChild(el(`<div class="section-title" style="margin-top:6px">${t}</div>`));
       const grid = el(`<div class="chip-grid"></div>`);
       DB.listCategories(t).forEach((c) => {
@@ -1035,6 +1131,7 @@
           <button type="button" class="type-choice ${type.v === "expense" ? "active expense" : ""}" data-v="expense">Expense</button>
           <button type="button" class="type-choice ${type.v === "income" ? "active income" : ""}" data-v="income">Income</button>
           <button type="button" class="type-choice ${type.v === "saving" ? "active saving" : ""}" data-v="saving">Saving</button>
+          <button type="button" class="type-choice ${type.v === "transfer" ? "active transfer" : ""}" data-v="transfer">Transfer</button>
         </div>
       </div>
       <div class="field"><label>Icon (emoji)</label><input type="text" id="f-icon" value="${existing ? existing.icon : "🏷️"}" maxlength="4" /></div>
@@ -1046,7 +1143,7 @@
     `, (body) => {
       body.querySelectorAll(".type-choice").forEach((b) => b.addEventListener("click", () => {
         type.v = b.dataset.v;
-        body.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving"));
+        body.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving", "transfer"));
         b.classList.add("active", type.v);
       }));
       body.querySelector("#save").addEventListener("click", () => {

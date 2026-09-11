@@ -26,6 +26,7 @@
         { id: uid(), name: "Bills", icon: "🧾", type: "expense" },
         { id: uid(), name: "Other", icon: "📦", type: "expense" },
         { id: uid(), name: "Savings", icon: "🐷", type: "saving" },
+        { id: uid(), name: "Transfer", icon: "🔁", type: "transfer" },
       ],
       pockets: [],
       pocketItems: [],

@@ -230,6 +230,27 @@ nav.bottom-nav #nav-add .ic {
 .seg button.active.income { background: var(--income); color: #fff; }
 .seg button.active.expense { background: var(--expense); color: #fff; }
 .seg button.active.saving { background: var(--primary); color: #fff; }
+.seg button.active.transfer { background: var(--accent, #3bd1ff); color: #fff; }
+.seg-4 button { padding: 9px 4px; font-size: 12.5px; }
+.amount-display {
+  width: 100%; box-sizing: border-box; text-align: right;
+  font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums;
+  padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-family: inherit;
+  margin-bottom: 10px; caret-color: var(--primary);
+}
+.calc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.calc-key {
+  height: 46px; border-radius: 10px; border: none;
+  background: var(--bg); color: var(--text);
+  font-size: 18px; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+.calc-key.op { background: var(--primary); color: #fff; }
+.calc-key.fn { background: var(--border); color: var(--text); }
+.calc-key.wide { grid-column: span 2; }
+.calc-key.eq { background: var(--income); color: #fff; }
+.calc-key:active { opacity: 0.8; transform: scale(0.97); }
+
 .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   border: 1px solid var(--border); background: var(--bg); border-radius: 999px;
@@ -285,6 +306,8 @@ nav.bottom-nav #nav-add .ic {
 .day-sub-row .amt { font-weight: 700; font-size: 14px; white-space: nowrap; color: var(--day-band-fg); font-variant-numeric: tabular-nums; }
 .day-sub-row .amt.income { color: #8fe3b8; }
 .day-sub-row .amt.saving { color: #b9cdfa; }
+.day-sub-row .amt.transfer { color: #ffd9a8; }
+.row-item .amt.transfer { color: var(--accent, #3bd1ff); }
 .day-groups-spacer { height: 28px; background: var(--day-row-bg); }
 
 .chart-empty { color: var(--text-muted); font-size: 13.5px; padding: 20px 0; text-align: center; }

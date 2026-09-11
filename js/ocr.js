@@ -18,7 +18,12 @@
   }
 
   const AMOUNT_KEYWORDS = /(จำนวนเงิน|จำนวน|amount|โอนเงิน|total|บาท|thb)/i;
-  const NUM_RE = /\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g;
+  // Comma-grouped numbers ("1,173.00") first, falling back to plain digit runs
+  // ("1173.00") — a plain \d{1,3}(,\d{3})* pattern silently truncates a
+  // non-comma-formatted 4+ digit amount at 3 digits and treats the remainder
+  // as a second, spurious token (this was the actual cause of amounts like
+  // 1,173 occasionally being read as a stray "3").
+  const NUM_RE = /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g;
 
   function extractAmount(text) {
     const lines = text.split(/\r?\n/);
@@ -33,9 +38,21 @@
       });
     });
     if (!candidates.length) return null;
-    const keyworded = candidates.filter((c) => c.keyword);
-    const pool = keyworded.length ? keyworded : candidates;
-    pool.sort((a, b) => (b.hasDecimal - a.hasDecimal) || (b.val - a.val));
+
+    // Real bank-slip totals are almost always written with a ".00"-style decimal,
+    // and a keyword nearby is a good but imperfect signal (a stray small number —
+    // a reference digit, a masked account fragment — can also sit on a keyword
+    // line). Rank by both signals together rather than trusting "has a keyword"
+    // alone, which previously could pick a tiny unrelated number over the real,
+    // larger total sitting a line or two away with no keyword next to it.
+    const tiers = [
+      candidates.filter((c) => c.keyword && c.hasDecimal),
+      candidates.filter((c) => c.hasDecimal),
+      candidates.filter((c) => c.keyword),
+      candidates,
+    ];
+    const pool = tiers.find((t) => t.length) || candidates;
+    pool.sort((a, b) => b.val - a.val);
     return pool[0].val;
   }
 
