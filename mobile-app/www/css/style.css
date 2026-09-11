@@ -21,19 +21,10 @@
   --day-icon-bg: rgba(255, 255, 255, 0.14);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115;
-    --surface: #1a1c23;
-    --text: #f0f1f5;
-    --text-muted: #9aa0ac;
-    --border: #2a2d36;
-    --primary: #4a6684;
-    --accent: #3bd1ff;
-    --day-header-bg: #33455c;
-    --day-row-bg: #1a2531;
-  }
-}
+/* This app is designed to one specific light palette (matching the Figma
+   design exactly) rather than adapting to the system theme — no dark-mode
+   override, so the colors above always apply regardless of the phone's
+   theme setting. */
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
