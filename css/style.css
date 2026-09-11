@@ -163,14 +163,19 @@ nav.bottom-nav a {
   color: var(--text-muted);
   font-size: 11px;
 }
-nav.bottom-nav a .ic { font-size: 20px; }
-nav.bottom-nav a.active { color: var(--accent); font-weight: 700; }
-nav.bottom-nav a#nav-add { color: var(--text-muted); }
-nav.bottom-nav #nav-add .ic {
-  background: #16171d; color: #fff; border-radius: 999px;
-  width: 50px; height: 50px; display: flex; align-items: center; justify-content: center;
-  font-size: 22px; margin: -26px auto 4px;
-  box-shadow: 0 8px 18px -6px rgba(22, 23, 29, 0.55);
+nav.bottom-nav a .nav-ic {
+  display: block;
+  width: 46px; height: 31px;
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  background-color: var(--text-muted);
+}
+nav.bottom-nav a.active .nav-ic { background-color: var(--accent); }
+nav.bottom-nav .nav-ic-add {
+  width: 50px; height: auto;
+  margin-top: -26px;
+  filter: drop-shadow(0 8px 14px rgba(22, 23, 29, 0.45));
 }
 
 .list { display: flex; flex-direction: column; gap: 8px; }

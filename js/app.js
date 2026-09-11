@@ -18,11 +18,11 @@
   // that got pulled off of Home (This Month, Expense by Category, Overview,
   // Recurring Income); swap it out once the final placement is decided.
   const NAV = [
-    { route: "dashboard", icon: "🏠", label: "Home" },
-    { route: "pockets", icon: "💼", label: "Pocket" },
-    { action: "add", icon: "➕", label: "Add" },
-    { route: "stats", icon: "🕐", label: "History" },
-    { route: "settings", icon: "⚙️", label: "Settings" },
+    { route: "dashboard", img: "icons/nav/nav-home.png", label: "Home" },
+    { route: "pockets", img: "icons/nav/nav-wallet.png", label: "Pocket" },
+    { action: "add", img: "icons/nav/nav-add-container.png", label: "Add" },
+    { route: "stats", img: "icons/nav/nav-history.png", label: "History" },
+    { route: "settings", img: "icons/nav/nav-settings.png", label: "Settings" },
   ];
 
   function parseHash() {
@@ -108,8 +108,8 @@
       <nav class="bottom-nav">
         ${NAV.map((n) =>
           n.action === "add"
-            ? `<a href="#" id="nav-add"><span class="ic">${n.icon}</span>${n.label}</a>`
-            : `<a href="#/${n.route}" data-route="${n.route}"><span class="ic">${n.icon}</span>${n.label}</a>`
+            ? `<a href="#" id="nav-add"><img class="nav-ic-add" src="${n.img}" alt="${n.label}"></a>`
+            : `<a href="#/${n.route}" data-route="${n.route}"><span class="nav-ic" role="img" aria-label="${n.label}" style="-webkit-mask-image:url('${n.img}');mask-image:url('${n.img}')"></span></a>`
         ).join("")}
       </nav>
     `;
