@@ -627,7 +627,12 @@
     saving: "Saving is money you set aside — it won't count as spending in your totals.",
     transfer: "Transfer is money moving between your own accounts/pockets — it won't count as spending or income.",
   };
-  const TYPE_ICONS = { expense: "⬆️", income: "⬇️", saving: "🐷", transfer: "🔁" };
+  const TYPE_ICONS = {
+    expense: "icons/tx/outcome.png",
+    income: "icons/tx/income.png",
+    saving: "icons/tx/saving.png",
+    transfer: "icons/tx/transfer.png",
+  };
 
   // A small self-contained month-grid calendar popup, used in place of the
   // native <input type=date> picker — some WebViews (notably the Android
@@ -739,6 +744,13 @@
         .join("");
     }
 
+    // Selected categories keep their own emoji icon; with none chosen yet,
+    // fall back to the generic category glyph.
+    function catIconHtml() {
+      const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+      return cat ? escapeHtml(cat.icon) : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+    }
+
     const receiptImage = ocr.receiptImage || (existing ? existing.receiptImage : null);
     const receiptHtml = receiptImage
       ? `<div class="receipt-preview"><img src="${receiptImage}" alt="Receipt" />${ocr.scanning ? `<div class="ocr-status" id="ocr-status">🔍 Scanning photo for the amount…</div>` : ""}</div>`
@@ -757,13 +769,13 @@
       <div id="type-hint" class="type-hint">${TYPE_HINTS[type.v] || ""}</div>
 
       <div class="tx-row" id="tx-date-row">
-        <span class="tx-row-icon">🕐</span>
+        <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
         <span class="tx-row-text" id="tx-date-label">${formatDateLong(date.v)}</span>
       </div>
       ${calendarPanelHtml("tx-date", "Select date")}
 
       <div class="tx-row tx-amount-row" id="tx-amount-row">
-        <span class="tx-row-icon tx-icon-badge type-${type.v}" id="tx-type-icon">${TYPE_ICONS[type.v]}</span>
+        <span class="tx-row-icon tx-icon-badge" id="tx-type-icon"><img class="tx-icon-img" src="${TYPE_ICONS[type.v]}" alt="" /></span>
         <span class="tx-row-text">Amount</span>
         <span class="tx-row-value" id="f-amount-value">0 ${currency}</span>
       </div>
@@ -772,7 +784,7 @@
       </div>
 
       <div class="tx-row" id="tx-category-row">
-        <span class="tx-row-icon tx-icon-badge tx-cat-badge" id="tx-cat-icon">🏷️</span>
+        <span class="tx-row-icon tx-icon-badge" id="tx-cat-icon">${catIconHtml()}</span>
         <span class="tx-row-text" id="tx-cat-label">category</span>
         <span class="tx-row-chevron">›</span>
       </div>
@@ -786,7 +798,7 @@
       </div>
 
       <div class="tx-row" id="tx-recurring-row">
-        <span class="tx-row-icon">🔁</span>
+        <img class="tx-row-icon" src="icons/tx/recurring.png" alt="" />
         <span class="tx-row-text" id="tx-recurring-label">${recurringLabelText(recurring.v)}</span>
         <span class="tx-row-chevron">›</span>
       </div>
@@ -883,7 +895,7 @@
       const catPanel = sheetBody.querySelector("#tx-cat-panel");
       function updateCatRow() {
         const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
-        sheetBody.querySelector("#tx-cat-icon").textContent = cat ? cat.icon : "🏷️";
+        sheetBody.querySelector("#tx-cat-icon").innerHTML = catIconHtml();
         sheetBody.querySelector("#tx-cat-label").textContent = cat ? cat.name : "category";
       }
       catRow.addEventListener("click", () => {
@@ -908,9 +920,7 @@
         sheetBody.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active"));
         b.classList.add("active");
         sheetBody.querySelector("#type-hint").textContent = TYPE_HINTS[type.v] || "";
-        const icon = sheetBody.querySelector("#tx-type-icon");
-        icon.textContent = TYPE_ICONS[type.v];
-        icon.className = `tx-row-icon tx-icon-badge type-${type.v}`;
+        sheetBody.querySelector("#tx-type-icon img").src = TYPE_ICONS[type.v];
         refreshCats();
         updateCatRow();
       }));
