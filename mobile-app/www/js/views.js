@@ -102,12 +102,15 @@
             const subParts = [];
             if (pocket) subParts.push(escapeHtml(pocket.name));
             if (t.payee) subParts.push(escapeHtml(t.payee));
-            if (t.note) subParts.push(escapeHtml(t.note));
+            // Auto-logged rows (bill payments, recurring, slip scans) skip the
+            // note — it's just boilerplate ("Rent", "Auto-logged from slip
+            // photo") that repeats what the category/pocket already show.
+            if (t.note && !t.autoLogged) subParts.push(escapeHtml(t.note));
             const row = el(`
               <div class="day-sub-row">
                 <div class="emoji">${c ? c.icon : fallbackIcon}</div>
                 <div class="main">
-                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.autoLogged ? " 🤖" : ""}</div>
+                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
                 </div>
                 <div class="amt ${t.type}">${amtSign}${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
@@ -256,6 +259,7 @@
       note: item.name,
       pocketId: item.pocketId,
       pocketItemId: item.id,
+      autoLogged: true,
     });
     DB.setPocketItemPaid(item.id, mk, true, tx.id);
 
@@ -276,11 +280,19 @@
     wrap.appendChild(monthSwitcher(state));
 
     const currency = DB.getSettings().currency;
-    const txs = DB.listTransactions().filter((t) => txInMonth(t, state.month));
-    const salary = txs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-    const expense = txs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-    const saved = txs.filter((t) => t.type === "saving").reduce((s, t) => s + t.amount, 0);
-    const remaining = salary - expense;
+    const pockets = DB.listPockets();
+    const allItems = pockets.flatMap((p) => DB.listPocketItems(p.id));
+    // Pockets' own "Monthly Expense"/"Save" are the total monthly obligation
+    // across every bill/saving item (regardless of paid status this month) —
+    // deliberately separate from Home's statement total, which sums actually
+    // logged transactions app-wide. "Remaining" here is Salary minus that
+    // pocket commitment, not a net-of-everything figure.
+    const salary = DB.listTransactions()
+      .filter((t) => txInMonth(t, state.month) && t.type === "income")
+      .reduce((s, t) => s + t.amount, 0);
+    const pocketExpense = allItems.filter((i) => i.kind !== "saving").reduce((s, i) => s + i.amount, 0);
+    const pocketSave = allItems.filter((i) => i.kind === "saving").reduce((s, i) => s + i.amount, 0);
+    const remaining = salary - pocketExpense;
 
     const statsRow = el(`
       <div class="pocket-stats-row">
@@ -290,14 +302,13 @@
         </button>
         <div class="pocket-stat right">
           <div class="pocket-stat-label">Monthly Expense</div>
-          <div class="pocket-stat-value">${formatNumber(expense)}<span class="cur">${escapeHtml(currency)}</span></div>
+          <div class="pocket-stat-value">${formatNumber(pocketExpense)}<span class="cur">${escapeHtml(currency)}</span></div>
         </div>
       </div>
     `);
     statsRow.querySelector("#salary-stat").addEventListener("click", () => openTransactionForm(state, null, { type: "income" }));
     wrap.appendChild(statsRow);
 
-    const pockets = DB.listPockets();
     if (!pockets.length) {
       const emptyCard = el(`
         <div class="pocket-empty-card">
@@ -322,7 +333,7 @@
     wrap.appendChild(el(`
       <div class="pocket-foot-stats">
         <div class="pocket-foot-row"><span>Remaining</span><span class="amt remaining">${formatMoney(remaining)}</span></div>
-        <div class="pocket-foot-row"><span>Save</span><span class="amt save">${formatMoney(saved)}</span></div>
+        <div class="pocket-foot-row"><span>Save</span><span class="amt save">${formatMoney(pocketSave)}</span></div>
       </div>
     `));
 
