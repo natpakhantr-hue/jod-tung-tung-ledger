@@ -30,7 +30,6 @@
       ],
       pockets: [],
       pocketItems: [],
-      recurringIncomes: [],
       transactions: [],
       scannedPhotos: {},
     };
@@ -173,43 +172,6 @@
         i.paidRecords[monthKey] = { paid: true, transactionId: transactionId || null };
       } else {
         delete i.paidRecords[monthKey];
-      }
-      persist();
-    },
-
-    // Recurring income sources (e.g. monthly salary) — defined once, logged with one tap each month.
-    listRecurringIncomes: () => data.recurringIncomes.slice(),
-    getRecurringIncome: (id) => data.recurringIncomes.find((r) => r.id === id),
-    addRecurringIncome(item) {
-      const r = {
-        id: uid(),
-        name: item.name,
-        amount: Number(item.amount) || 0,
-        categoryId: item.categoryId || null,
-        dueDay: item.dueDay ? Number(item.dueDay) : null,
-        receivedRecords: {},
-      };
-      data.recurringIncomes.push(r);
-      persist();
-      return r;
-    },
-    updateRecurringIncome(id, patch) {
-      const r = data.recurringIncomes.find((x) => x.id === id);
-      if (r) Object.assign(r, patch);
-      persist();
-    },
-    deleteRecurringIncome(id) {
-      data.recurringIncomes = data.recurringIncomes.filter((r) => r.id !== id);
-      persist();
-    },
-    setRecurringIncomeReceived(id, monthKey, received, transactionId) {
-      const r = data.recurringIncomes.find((x) => x.id === id);
-      if (!r) return;
-      if (!r.receivedRecords) r.receivedRecords = {};
-      if (received) {
-        r.receivedRecords[monthKey] = { received: true, transactionId: transactionId || null };
-      } else {
-        delete r.receivedRecords[monthKey];
       }
       persist();
     },

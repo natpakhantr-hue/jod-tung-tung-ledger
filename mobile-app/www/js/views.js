@@ -50,58 +50,6 @@
     return Utils.dateForDay(mk, day);
   }
 
-  function recurringIncomeStatus(item, mk) {
-    const received = !!(item.receivedRecords && item.receivedRecords[mk]);
-    if (received) return "received";
-    const cmp = monthCompare(mk, Utils.monthKey());
-    if (cmp < 0) return "overdue";
-    if (cmp > 0) return "upcoming";
-    if (item.dueDay && new Date().getDate() > item.dueDay) return "overdue";
-    return "unreceived";
-  }
-
-  function toggleReceived(item, mk) {
-    const isReceived = !!(item.receivedRecords && item.receivedRecords[mk]);
-    if (isReceived) {
-      const rec = item.receivedRecords[mk];
-      if (rec && rec.transactionId) DB.deleteTransaction(rec.transactionId);
-      DB.setRecurringIncomeReceived(item.id, mk, false);
-      App.toast("Unmarked");
-    } else {
-      const cat = item.categoryId ? categoryById(item.categoryId) : null;
-      const tx = DB.addTransaction({
-        date: transactionDateForMonth(mk, item.dueDay),
-        type: "income",
-        amount: item.amount,
-        categoryId: cat ? cat.id : null,
-        note: item.name,
-      });
-      DB.setRecurringIncomeReceived(item.id, mk, true, tx.id);
-      App.toast("Logged to ledger");
-    }
-    App.render();
-  }
-
-  function recurringIncomeRow(item, mk) {
-    const status = recurringIncomeStatus(item, mk);
-    const pillClass = status === "received" ? "paid" : status === "overdue" ? "overdue" : "unpaid";
-    const pillText = status === "received" ? "Logged" : status === "overdue" ? "Not yet logged" : status === "upcoming" ? "Upcoming" : "Not logged";
-    const cat = item.categoryId ? categoryById(item.categoryId) : null;
-    const row = el(`
-      <div class="row-item">
-        <div class="emoji">${cat ? cat.icon : "💰"}</div>
-        <div class="main">
-          <div class="title">${escapeHtml(item.name)}</div>
-          <div class="sub">${item.dueDay ? "usually by day " + item.dueDay : ""} · <span class="pill ${pillClass}">${pillText}</span></div>
-        </div>
-        <div class="amt income">${formatMoney(item.amount)}</div>
-      </div>
-    `);
-    row.style.cursor = "pointer";
-    row.addEventListener("click", () => toggleReceived(item, mk));
-    return row;
-  }
-
   function txInMonth(tx, mk) {
     return tx.date && tx.date.slice(0, 7) === mk;
   }
@@ -1410,35 +1358,6 @@
     });
     wrap.appendChild(generalCard);
 
-    const incomeCard = el(`<div class="card"><h2>Recurring Income</h2></div>`);
-    const recurring = DB.listRecurringIncomes();
-    if (!recurring.length) {
-      incomeCard.appendChild(el(`<div class="chart-empty">No recurring income yet, e.g. a monthly salary.</div>`));
-    } else {
-      const list = el(`<div class="list"></div>`);
-      recurring.forEach((r) => {
-        const cat = r.categoryId ? categoryById(r.categoryId) : null;
-        const row = el(`
-          <div class="row-item">
-            <div class="emoji">${cat ? cat.icon : "💰"}</div>
-            <div class="main">
-              <div class="title">${escapeHtml(r.name)}</div>
-              <div class="sub">${r.dueDay ? "usually by day " + r.dueDay : "no fixed day"}</div>
-            </div>
-            <div class="amt income">${formatMoney(r.amount)}</div>
-          </div>
-        `);
-        row.style.cursor = "pointer";
-        row.addEventListener("click", () => openRecurringIncomeForm(r));
-        list.appendChild(row);
-      });
-      incomeCard.appendChild(list);
-    }
-    const addIncomeBtn = el(`<button class="secondary" style="width:100%;margin-top:12px">＋ Add Recurring Income</button>`);
-    addIncomeBtn.addEventListener("click", () => openRecurringIncomeForm());
-    incomeCard.appendChild(addIncomeBtn);
-    wrap.appendChild(incomeCard);
-
     const isNativeApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins && window.Capacitor.Plugins.GalleryScan);
 
     if (isNativeApp) {
@@ -1546,50 +1465,6 @@
     wrap.appendChild(dataCard);
 
     return wrap;
-  }
-
-  function openRecurringIncomeForm(existing) {
-    const categoryId = { v: existing ? existing.categoryId : null };
-    function catChips() {
-      return DB.listCategories("income")
-        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${c.icon} ${escapeHtml(c.name)}</div>`)
-        .join("");
-    }
-    App.openSheet(existing ? "Edit Recurring Income" : "New Recurring Income", `
-      <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Salary" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
-      <div class="field"><label>Amount</label><input type="number" id="f-amount" inputmode="decimal" value="${existing ? existing.amount : ""}" /></div>
-      <div class="field"><label>Category</label><div class="chip-grid" id="f-cats">${catChips()}</div></div>
-      <div class="field"><label>Usually received by day (optional)</label><input type="number" id="f-due" min="1" max="31" value="${existing && existing.dueDay ? existing.dueDay : ""}" /></div>
-      <div class="sheet-actions">
-        ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
-        <button class="primary" id="save">Save</button>
-      </div>
-    `, (body) => {
-      body.querySelectorAll(".cat-choice").forEach((b) => b.addEventListener("click", () => {
-        categoryId.v = b.dataset.v;
-        body.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-      }));
-      body.querySelector("#save").addEventListener("click", () => {
-        const name = body.querySelector("#f-name").value.trim();
-        const amount = Number(body.querySelector("#f-amount").value);
-        if (!name || !amount) return App.toast("Enter name and amount");
-        const dueRaw = body.querySelector("#f-due").value;
-        const payload = { name, amount, categoryId: categoryId.v, dueDay: dueRaw ? Number(dueRaw) : null };
-        if (existing) {
-          DB.updateRecurringIncome(existing.id, payload);
-        } else {
-          DB.addRecurringIncome(payload);
-        }
-        App.closeSheet();
-        App.render();
-      });
-      wireDeleteButton(body.querySelector("#delete"), () => {
-        DB.deleteRecurringIncome(existing.id);
-        App.closeSheet();
-        App.render();
-      }, "Tap again to delete");
-    });
   }
 
   function exportData() {
