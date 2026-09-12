@@ -248,7 +248,9 @@
     if (scanInFlight) return;
     scanInFlight = true;
     try {
-      if (window.Views.runRecurringTransactions()) render();
+      const recurringLogged = window.Views.runRecurringTransactions();
+      const autoDebited = window.Views.runAutoDebitBills();
+      if (recurringLogged || autoDebited) render();
       await checkPendingSharedPhoto();
       await checkNativeGallery();
     } finally {

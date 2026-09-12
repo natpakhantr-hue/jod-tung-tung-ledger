@@ -146,6 +146,7 @@
     const parts = [];
     if (item.installments) parts.push(`${paidMonthsCount(item)}/${item.installments} paid`);
     if (item.dueDay) parts.push(`due date ${formatDateLong(Utils.dateForDay(state.month, item.dueDay))}`);
+    if (item.autoDebit) parts.push("auto debit");
     return parts.join(" · ");
   }
 
@@ -234,23 +235,15 @@
     return group;
   }
 
-  function togglePaid(item, mk) {
+  // Creates the paid transaction for a bill/saving item and marks it paid;
+  // shared by the manual checkbox toggle and the silent auto-debit engine.
+  function markPocketItemPaid(item, mk) {
     const isSaving = item.kind === "saving";
-    const isPaid = !!(item.paidRecords && item.paidRecords[mk]);
-    if (isPaid) {
-      const rec = item.paidRecords[mk];
-      if (rec && rec.transactionId) DB.deleteTransaction(rec.transactionId);
-      DB.setPocketItemPaid(item.id, mk, false);
-      App.toast(isSaving ? "Unmarked" : "Marked unpaid");
-      App.render();
-      return;
-    }
     const cat = item.categoryId ? categoryById(item.categoryId) : null;
     const txType = isSaving ? "saving" : "expense";
     const fallbackCat = cat || (isSaving
       ? DB.listCategories("saving")[0]
       : DB.listCategories("expense").find((c) => /bills?/i.test(c.name)) || DB.listCategories("expense")[0]);
-    const pocket = DB.getPocket(item.pocketId);
     const tx = DB.addTransaction({
       date: transactionDateForMonth(mk, item.dueDay),
       type: txType,
@@ -262,15 +255,52 @@
       autoLogged: true,
     });
     DB.setPocketItemPaid(item.id, mk, true, tx.id);
-
     const fresh = DB.getPocketItem(item.id);
-    if (fresh && fresh.installments && paidMonthsCount(fresh) >= fresh.installments) {
-      DB.deletePocketItem(item.id);
+    const completedInstallment = !!(fresh && fresh.installments && paidMonthsCount(fresh) >= fresh.installments);
+    if (completedInstallment) DB.deletePocketItem(item.id);
+    return { isSaving, completedInstallment };
+  }
+
+  function togglePaid(item, mk) {
+    const isSaving = item.kind === "saving";
+    const isPaid = !!(item.paidRecords && item.paidRecords[mk]);
+    if (isPaid) {
+      const rec = item.paidRecords[mk];
+      if (rec && rec.transactionId) DB.deleteTransaction(rec.transactionId);
+      DB.setPocketItemPaid(item.id, mk, false);
+      App.toast(isSaving ? "Unmarked" : "Marked unpaid");
+      App.render();
+      return;
+    }
+    const pocket = DB.getPocket(item.pocketId);
+    const { completedInstallment } = markPocketItemPaid(item, mk);
+    if (completedInstallment) {
       App.toast(`Installment plan complete — "${item.name}" cleared from ${pocket ? pocket.name : "pocket"}`);
     } else {
       App.toast(isSaving ? "Marked as saved & logged" : "Marked paid & logged to ledger");
     }
     App.render();
+  }
+
+  // Bills flagged auto-debit are marked paid (and logged) as soon as their
+  // due day arrives, without waiting for a manual tap — mirrors a real
+  // automatic bank debit. Runs on app open, same cadence as recurring
+  // transactions.
+  function runAutoDebitBills() {
+    const mk = Utils.monthKey();
+    const today = new Date().getDate();
+    let changed = false;
+    DB.listPockets().forEach((pocket) => {
+      DB.listPocketItems(pocket.id).forEach((item) => {
+        if (!item.autoDebit) return;
+        const isPaid = !!(item.paidRecords && item.paidRecords[mk]);
+        if (isPaid) return;
+        if (item.dueDay && today < item.dueDay) return;
+        markPocketItemPaid(item, mk);
+        changed = true;
+      });
+    });
+    return changed;
   }
 
   // ---------- POCKETS ----------
@@ -285,14 +315,14 @@
     // Pockets' own "Monthly Expense"/"Save" are the total monthly obligation
     // across every bill/saving item (regardless of paid status this month) —
     // deliberately separate from Home's statement total, which sums actually
-    // logged transactions app-wide. "Remaining" here is Salary minus that
-    // pocket commitment, not a net-of-everything figure.
+    // logged transactions app-wide. "Remaining" here is Salary minus both
+    // (bills and money set aside), not a net-of-everything figure.
     const salary = DB.listTransactions()
       .filter((t) => txInMonth(t, state.month) && t.type === "income")
       .reduce((s, t) => s + t.amount, 0);
     const pocketExpense = allItems.filter((i) => i.kind !== "saving").reduce((s, i) => s + i.amount, 0);
     const pocketSave = allItems.filter((i) => i.kind === "saving").reduce((s, i) => s + i.amount, 0);
-    const remaining = salary - pocketExpense;
+    const remaining = salary - pocketExpense - pocketSave;
 
     const statsRow = el(`
       <div class="pocket-stats-row">
@@ -499,11 +529,13 @@
     // from); left unset otherwise so it can be picked explicitly.
     const chosenPocketId = { v: pocketId || (existing ? existing.pocketId : null) };
     const newPocketName = { v: "" };
+    const autoDebit = { v: existing ? !!existing.autoDebit : false };
     const currency = DB.getSettings().currency;
     // dueDay is a plain day-of-month (recurs every month); the calendar
     // picker is just a friendlier way to choose it — only the day is kept.
     const dueDay = { v: existing && existing.dueDay ? existing.dueDay : new Date().getDate() };
     const dueDateIso = { v: Utils.dateForDay(Utils.monthKey(), dueDay.v) };
+    const dueEnabled = { v: existing ? !!existing.dueDay : true };
 
     function catChips() {
       return DB.listCategories(kind.v === "saving" ? "saving" : "expense")
@@ -536,13 +568,16 @@
       `
       <div class="seg tx-type-seg">
         <button type="button" class="kind-choice ${kind.v === "bill" ? "active" : ""}" data-v="bill">Bill</button>
-        <button type="button" class="kind-choice ${kind.v === "saving" ? "active" : ""}" data-v="saving">Saving Remainder</button>
+        <button type="button" class="kind-choice ${kind.v === "saving" ? "active" : ""}" data-v="saving">Reminder</button>
       </div>
       <div class="type-hint">${kind.v === "saving" ? "Reminds you to set money aside — it won't count as spending." : "Logs a real expense to your ledger once marked paid."}</div>
 
-      <div class="tx-row" id="pk-due-row">
-        <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
-        <span class="tx-row-text" id="pk-due-label">${formatDateLong(dueDateIso.v)}</span>
+      <div class="tx-row ${dueEnabled.v ? "" : "pk-row-disabled"}" id="pk-due-row">
+        <span class="pk-tap-area" id="pk-due-tap">
+          <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
+          <span class="tx-row-text" id="pk-due-label">${dueEnabled.v ? formatDateLong(dueDateIso.v) : "No due date"}</span>
+        </span>
+        <span class="pk-switch ${dueEnabled.v ? "on" : ""}" id="pk-due-switch"><span class="pk-switch-knob"></span></span>
       </div>
       ${calendarPanelHtml("pk-due", "Select due date")}
 
@@ -582,6 +617,13 @@
       <div class="tx-row tx-note-row"><input type="number" id="pk-installments" class="tx-note-input" placeholder="installments" min="1" value="${existing && existing.installments ? existing.installments : ""}" /></div>
       <div class="tx-row tx-note-row"><input type="text" id="pk-note" class="tx-note-input" placeholder="note" value="${existing ? escapeHtml(existing.note || "") : ""}" /></div>
 
+      <div class="tx-row" id="pk-auto-row">
+        <img class="tx-row-icon" src="icons/tx/recurring.png" alt="" />
+        <span class="tx-row-text">Auto debit every month</span>
+        <span class="pk-switch ${autoDebit.v ? "on" : ""}" id="pk-auto-switch"><span class="pk-switch-knob"></span></span>
+      </div>
+      <div class="type-hint">Marks this paid and logs it automatically once its due day arrives each month — no need to tap.</div>
+
       <div class="sheet-actions">
         ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
         <button class="primary" id="save">Save</button>
@@ -608,11 +650,25 @@
       syncAmount();
 
       const dueLabel = sheetBody.querySelector("#pk-due-label");
-      wireCalendarPanel(sheetBody, "pk-due", sheetBody.querySelector("#pk-due-row"), () => dueDateIso.v, (iso) => {
+      const dueTap = sheetBody.querySelector("#pk-due-tap");
+      // Registered before wireCalendarPanel's own click listener on the same
+      // element, so when the due date is off this blocks that later listener
+      // (stopImmediatePropagation) instead of popping the calendar anyway.
+      dueTap.addEventListener("click", (e) => {
+        if (!dueEnabled.v) e.stopImmediatePropagation();
+      });
+      wireCalendarPanel(sheetBody, "pk-due", dueTap, () => dueDateIso.v, (iso) => {
         dueDateIso.v = iso;
         dueDay.v = Number(iso.slice(8, 10));
         dueLabel.textContent = formatDateLong(iso);
         sheetBody.querySelector("#pk-due-panel").classList.add("hidden");
+      });
+      sheetBody.querySelector("#pk-due-switch").addEventListener("click", (e) => {
+        e.stopPropagation();
+        dueEnabled.v = !dueEnabled.v;
+        sheetBody.querySelector("#pk-due-switch").classList.toggle("on", dueEnabled.v);
+        sheetBody.querySelector("#pk-due-row").classList.toggle("pk-row-disabled", !dueEnabled.v);
+        dueLabel.textContent = dueEnabled.v ? formatDateLong(dueDateIso.v) : "No due date";
       });
 
       const catRow = sheetBody.querySelector("#pk-category-row");
@@ -684,6 +740,11 @@
       refreshCats();
       updateCatRow();
 
+      sheetBody.querySelector("#pk-auto-row").addEventListener("click", () => {
+        autoDebit.v = !autoDebit.v;
+        sheetBody.querySelector("#pk-auto-switch").classList.toggle("on", autoDebit.v);
+      });
+
       sheetBody.querySelector("#save").addEventListener("click", () => {
         const name = sheetBody.querySelector("#pk-name").value.trim();
         const amount = readAmountValue(amountInput);
@@ -694,9 +755,10 @@
           amount,
           kind: kind.v,
           categoryId: categoryId.v,
-          dueDay: dueDay.v,
+          dueDay: dueEnabled.v ? dueDay.v : null,
           installments: installRaw ? Number(installRaw) : null,
           note: sheetBody.querySelector("#pk-note").value.trim(),
+          autoDebit: autoDebit.v,
         };
         // Resolve which pocket this goes into: an existing one you picked,
         // a brand-new one under the typed (or, failing that, the bill's own)
@@ -1562,5 +1624,6 @@
     autoLogSlip,
     blobToResizedDataUrl,
     runRecurringTransactions,
+    runAutoDebitBills,
   };
 })();
