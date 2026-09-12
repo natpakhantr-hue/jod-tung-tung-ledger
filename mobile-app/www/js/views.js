@@ -1,10 +1,11 @@
 (function () {
   "use strict";
 
-  const { el, formatMoney, formatDateShort, monthLabel, shiftMonth, todayISO, escapeHtml } = Utils;
+  const { el, formatMoney, formatNumber, formatDateShort, formatDateLong, monthLabel, shiftMonth, todayISO, escapeHtml, pad2 } = Utils;
 
   function setHeader(title, actionsHtml) {
     document.getElementById("page-title").textContent = title;
+    document.querySelector("header.topbar").classList.toggle("compact", !title);
     document.querySelector("header.topbar .actions").innerHTML = actionsHtml || "";
   }
 
@@ -49,58 +50,6 @@
     return Utils.dateForDay(mk, day);
   }
 
-  function recurringIncomeStatus(item, mk) {
-    const received = !!(item.receivedRecords && item.receivedRecords[mk]);
-    if (received) return "received";
-    const cmp = monthCompare(mk, Utils.monthKey());
-    if (cmp < 0) return "overdue";
-    if (cmp > 0) return "upcoming";
-    if (item.dueDay && new Date().getDate() > item.dueDay) return "overdue";
-    return "unreceived";
-  }
-
-  function toggleReceived(item, mk) {
-    const isReceived = !!(item.receivedRecords && item.receivedRecords[mk]);
-    if (isReceived) {
-      const rec = item.receivedRecords[mk];
-      if (rec && rec.transactionId) DB.deleteTransaction(rec.transactionId);
-      DB.setRecurringIncomeReceived(item.id, mk, false);
-      App.toast("Unmarked");
-    } else {
-      const cat = item.categoryId ? categoryById(item.categoryId) : null;
-      const tx = DB.addTransaction({
-        date: transactionDateForMonth(mk, item.dueDay),
-        type: "income",
-        amount: item.amount,
-        categoryId: cat ? cat.id : null,
-        note: item.name,
-      });
-      DB.setRecurringIncomeReceived(item.id, mk, true, tx.id);
-      App.toast("Logged to ledger");
-    }
-    App.render();
-  }
-
-  function recurringIncomeRow(item, mk) {
-    const status = recurringIncomeStatus(item, mk);
-    const pillClass = status === "received" ? "paid" : status === "overdue" ? "overdue" : "unpaid";
-    const pillText = status === "received" ? "Logged" : status === "overdue" ? "Not yet logged" : status === "upcoming" ? "Upcoming" : "Not logged";
-    const cat = item.categoryId ? categoryById(item.categoryId) : null;
-    const row = el(`
-      <div class="row-item">
-        <div class="emoji">${cat ? cat.icon : "💰"}</div>
-        <div class="main">
-          <div class="title">${escapeHtml(item.name)}</div>
-          <div class="sub">${item.dueDay ? "usually by day " + item.dueDay : ""} · <span class="pill ${pillClass}">${pillText}</span></div>
-        </div>
-        <div class="amt income">${formatMoney(item.amount)}</div>
-      </div>
-    `);
-    row.style.cursor = "pointer";
-    row.addEventListener("click", () => toggleReceived(item, mk));
-    return row;
-  }
-
   function txInMonth(tx, mk) {
     return tx.date && tx.date.slice(0, 7) === mk;
   }
@@ -111,130 +60,68 @@
 
   // ---------- HOME (statement + budget overview) ----------
   function dashboard(state) {
-    setHeader("Ledger");
+    setHeader("");
     const wrap = el(`<div></div>`);
     wrap.appendChild(monthSwitcher(state));
 
-    const recurringIncomes = DB.listRecurringIncomes();
-    if (recurringIncomes.length) {
-      const pending = recurringIncomes.filter((r) => recurringIncomeStatus(r, state.month) !== "received");
-      if (pending.length) {
-        const incomeCard = el(`<div class="card"><h2>Recurring Income</h2></div>`);
-        const list = el(`<div class="list"></div>`);
-        pending.forEach((r) => list.appendChild(recurringIncomeRow(r, state.month)));
-        incomeCard.appendChild(list);
-        wrap.appendChild(incomeCard);
-      }
-    }
-
     const txs = DB.listTransactions().filter((t) => txInMonth(t, state.month));
-    const income = txs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
     const expense = txs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-    const saved = txs.filter((t) => t.type === "saving").reduce((s, t) => s + t.amount, 0);
-    const net = income - expense;
+    const currency = DB.getSettings().currency;
 
     wrap.appendChild(el(`
-      <div class="card">
-        <h2>This Month</h2>
-        <div class="summary-grid">
-          <div class="stat"><div class="label">Income</div><div class="value income">${formatMoney(income)}</div></div>
-          <div class="stat"><div class="label">Expense</div><div class="value expense">${formatMoney(expense)}</div></div>
-        </div>
-        ${saved > 0 ? `<div class="budget-line"><span>Saved</span><span class="amt saving">${formatMoney(saved)}</span></div>` : ""}
-        <div class="budget-line remaining ${net < 0 ? "negative" : ""}" style="margin-top:10px">
-          <span>Remaining after expenses</span><span class="amt">${formatMoney(net)}</span>
-        </div>
+      <div class="statement-head">
+        <div class="eyebrow">Monthly Expense</div>
+        <div class="statement-total">${formatNumber(expense)}<span class="cur">${escapeHtml(currency)}</span></div>
       </div>
     `));
 
-    // Statement list: day -> category -> amount -> note
-    const statementCard = el(`<div class="card"><h2>Statement</h2></div>`);
     if (!txs.length) {
-      statementCard.appendChild(el(`<div class="chart-empty">No transactions this month yet. Tap + to add one.</div>`));
+      wrap.appendChild(el(`<div class="empty-state"><div class="big">🧾</div><div>No transactions this month yet.</div><div style="font-size:13px;margin-top:4px">Tap + to add one.</div></div>`));
     } else {
       const byDate = {};
       txs.forEach((t) => (byDate[t.date] = byDate[t.date] || []).push(t));
-      const list = el(`<div></div>`);
+      const groups = el(`<div class="day-groups"></div>`);
       Object.keys(byDate)
         .sort((a, b) => (a < b ? 1 : -1))
         .forEach((date) => {
-          list.appendChild(el(`<div class="section-title">${formatDateShort(date)}</div>`));
-          const dayList = el(`<div class="list"></div>`);
-          byDate[date].forEach((t) => {
+          const dayTxs = byDate[date];
+          const dayExpense = dayTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+          const group = el(`
+            <div class="day-group">
+              <div class="day-header-row">
+                <span>${formatDateShort(date)}</span>
+                <span>${formatNumber(dayExpense)} ${escapeHtml(currency)}</span>
+              </div>
+            </div>
+          `);
+          dayTxs.forEach((t) => {
             const c = categoryById(t.categoryId);
             const pocket = t.pocketId ? DB.getPocket(t.pocketId) : null;
-            const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : "💸";
+            const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : t.type === "transfer" ? "🔁" : "💸";
+            const amtSign = t.type === "income" ? "+" : t.type === "transfer" ? "" : "-";
             const subParts = [];
             if (pocket) subParts.push(escapeHtml(pocket.name));
             if (t.payee) subParts.push(escapeHtml(t.payee));
             if (t.note) subParts.push(escapeHtml(t.note));
             const row = el(`
-              <div class="row-item">
+              <div class="day-sub-row">
                 <div class="emoji">${c ? c.icon : fallbackIcon}</div>
                 <div class="main">
                   <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.autoLogged ? " 🤖" : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
                 </div>
-                <div class="amt ${t.type}">${t.type === "income" ? "+" : "-"}${formatMoney(t.amount)}</div>
+                <div class="amt ${t.type}">${amtSign}${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
               </div>
             `);
             row.style.cursor = "pointer";
             row.addEventListener("click", () => openTransactionForm(state, t));
-            dayList.appendChild(row);
+            group.appendChild(row);
           });
-          list.appendChild(dayList);
+          groups.appendChild(group);
         });
-      statementCard.appendChild(list);
+      groups.appendChild(el(`<div class="day-groups-spacer"></div>`));
+      wrap.appendChild(groups);
     }
-    wrap.appendChild(statementCard);
-
-    // Category pie chart with monthly-average comparison
-    const catTotals = {};
-    txs.filter((t) => t.type === "expense").forEach((t) => {
-      const c = categoryById(t.categoryId);
-      const key = c ? c.id : "uncategorized";
-      catTotals[key] = (catTotals[key] || 0) + t.amount;
-    });
-    const allExpenseTx = DB.listTransactions().filter((t) => t.type === "expense");
-    const activeMonths = new Set(allExpenseTx.map((t) => t.date.slice(0, 7)));
-    const monthCount = Math.max(1, activeMonths.size);
-    const catData = Object.entries(catTotals).map(([catId, value]) => {
-      const c = catId === "uncategorized" ? null : categoryById(catId);
-      const label = c ? `${c.icon} ${c.name}` : "🏷️ Uncategorized";
-      const histTotal = allExpenseTx
-        .filter((t) => (t.categoryId || "uncategorized") === catId)
-        .reduce((s, t) => s + t.amount, 0);
-      const avg = histTotal / monthCount;
-      const diffPct = avg > 0 ? Math.round(((value - avg) / avg) * 100) : null;
-      let sub = `avg ${formatMoney(avg)}/mo`;
-      let subClass = "";
-      if (diffPct != null && Math.abs(diffPct) >= 1) {
-        subClass = diffPct > 0 ? "up" : "down";
-        sub += ` · ${diffPct > 0 ? "+" : ""}${diffPct}% vs avg`;
-      }
-      return { label, value, sub: `<span class="${subClass}">${sub}</span>` };
-    });
-    wrap.appendChild(el(`<div class="card"><h2>Expense by Category</h2>${Charts.pieChart(catData)}<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Average is calculated across ${monthCount} month${monthCount === 1 ? "" : "s"} of history.</div></div>`));
-
-    // Income & pocket overview
-    const pockets = DB.listPockets();
-    const items = pockets.flatMap((p) => DB.listPocketItems(p.id));
-    const totalPocketCost = items.filter((i) => i.kind !== "saving").reduce((s, i) => s + i.amount, 0);
-    const totalPocketSaving = items.filter((i) => i.kind === "saving").reduce((s, i) => s + i.amount, 0);
-    const remainingAfterPockets = income - totalPocketCost - totalPocketSaving;
-    const spentPct = income > 0 ? Math.min(100, (expense / income) * 100) : 0;
-
-    wrap.appendChild(el(`
-      <div class="card">
-        <h2>Overview</h2>
-        <div class="budget-line"><span>Total Income</span><span class="amt">${formatMoney(income)}</span></div>
-        <div class="budget-line"><span>Pocket fixed costs</span><span class="amt">-${formatMoney(totalPocketCost)}</span></div>
-        ${totalPocketSaving > 0 ? `<div class="budget-line"><span>Pocket savings</span><span class="amt saving">-${formatMoney(totalPocketSaving)}</span></div>` : ""}
-        <div class="budget-line remaining ${remainingAfterPockets < 0 ? "negative" : ""}"><span>Remaining after pockets</span><span class="amt">${formatMoney(remainingAfterPockets)}</span></div>
-        <div class="progress-track"><div class="progress-fill ${income > 0 && expense > income ? "over" : ""}" style="width:${spentPct}%"></div></div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${formatMoney(expense)} spent of ${formatMoney(income)} income</div>
-      </div>
-    `));
 
     return wrap;
   }
@@ -246,29 +133,102 @@
     return isSaving ? "Not saved" : "Unpaid";
   }
 
-  function pocketItemRow(item, pocket, mk) {
-    const status = pocketItemStatus(item, mk);
-    const isSaving = item.kind === "saving";
-    const pillClass = status === "paid" ? "paid" : status === "overdue" ? "overdue" : "unpaid";
-    const pillText = billStatusLabel(status, isSaving);
+  // Pockets list: which pockets/bills are currently expanded in the
+  // accordion. Lives at module scope (not per-render) so it survives the
+  // full re-render that toggling paid state or expand/collapse triggers.
+  const expandedPockets = new Set();
+  const expandedPocketItems = new Set();
+
+  function pocketItemDetailLine(item, state) {
+    const parts = [];
+    if (item.installments) parts.push(`${paidMonthsCount(item)}/${item.installments} paid`);
+    if (item.dueDay) parts.push(`due date ${formatDateLong(Utils.dateForDay(state.month, item.dueDay))}`);
+    return parts.join(" · ");
+  }
+
+  // A bill/saving-reminder row inside an expanded pocket: check to toggle
+  // paid, amount, and its own arrow to reveal installment/due-date detail.
+  function pocketAccordionItemRow(item, pocket, state) {
+    const isPaid = pocketItemStatus(item, state.month) === "paid";
     const cat = item.categoryId ? categoryById(item.categoryId) : null;
-    const installBadge = item.installments ? `<span class="pill installment">${paidMonthsCount(item)}/${item.installments}</span>` : "";
-    const kindBadge = isSaving ? `<span class="pill installment">🐷 Reminder</span>` : "";
+    const isExpanded = expandedPocketItems.has(item.id);
+    const currency = DB.getSettings().currency;
+    const icon = cat ? cat.icon : item.kind === "saving" ? "🐷" : pocket.icon;
     const row = el(`
-      <div class="row-item">
-        <div class="emoji">${cat ? cat.icon : isSaving ? "🐷" : pocket ? pocket.icon : "💼"}</div>
-        <div class="main">
-          <div class="title">${escapeHtml(item.name)}</div>
-          <div class="sub">${pocket ? escapeHtml(pocket.name) : ""}${item.dueDay ? " · due " + item.dueDay : ""} · <span class="pill ${pillClass}">${pillText}</span> ${installBadge} ${kindBadge}</div>
-        </div>
-        <div style="text-align:right">
-          <div class="amt">${formatMoney(item.amount)}</div>
+      <div class="day-sub-row item-row">
+        <div class="emoji">${icon}</div>
+        <div class="main"><div class="title">${escapeHtml(item.name)}</div></div>
+        <div class="item-actions">
+          <button type="button" class="check-btn ${isPaid ? "paid" : ""}">✓</button>
+          <span class="amt">${formatNumber(item.amount)} ${escapeHtml(currency)}</span>
+          <button type="button" class="item-toggle">${isExpanded ? "▾" : "▴"}</button>
         </div>
       </div>
     `);
-    row.style.cursor = "pointer";
-    row.addEventListener("click", () => togglePaid(item, mk));
+    row.querySelector(".check-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePaid(item, state.month);
+    });
+    row.querySelector(".item-toggle").addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (isExpanded) expandedPocketItems.delete(item.id);
+      else expandedPocketItems.add(item.id);
+      App.render();
+    });
+    row.addEventListener("click", () => openPocketItemActions(item, pocket, state.month));
     return row;
+  }
+
+  // A pocket as a collapsible group: collapsed shows one summary row (paid
+  // check + total + arrow); expanded shows the pocket name as a header
+  // followed by each bill's own row.
+  function pocketGroupEl(pocket, state) {
+    const items = DB.listPocketItems(pocket.id);
+    const total = items.reduce((s, i) => s + i.amount, 0);
+    const allPaid = items.length > 0 && items.every((i) => pocketItemStatus(i, state.month) === "paid");
+    const isExpanded = expandedPockets.has(pocket.id);
+    const currency = DB.getSettings().currency;
+
+    const group = el(`<div class="day-group pocket-group"></div>`);
+    const header = el(`
+      <div class="day-header-row pocket-head">
+        <span>${escapeHtml(pocket.name)}</span>
+        <span class="pocket-head-right"></span>
+      </div>
+    `);
+    header.querySelector(".pocket-head-right").innerHTML = isExpanded
+      ? `<button type="button" class="pocket-toggle">▾</button>`
+      : `
+        <span class="check-btn ${allPaid ? "paid" : ""}" style="pointer-events:none">✓</span>
+        <span class="amt">${formatNumber(total)} ${escapeHtml(currency)}</span>
+        <button type="button" class="pocket-toggle">▴</button>
+      `;
+    header.querySelector(".pocket-toggle").addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (isExpanded) expandedPockets.delete(pocket.id);
+      else expandedPockets.add(pocket.id);
+      App.render();
+    });
+    header.addEventListener("click", () => App.navigate(`#/pocket/${pocket.id}`));
+    group.appendChild(header);
+
+    if (isExpanded) {
+      if (!items.length) {
+        group.appendChild(el(`<div class="day-sub-row item-empty"><div class="main"><div class="sub">No bills in this pocket yet.</div></div></div>`));
+      } else {
+        items
+          .slice()
+          .sort((a, b) => (a.dueDay || 99) - (b.dueDay || 99))
+          .forEach((item) => {
+            group.appendChild(pocketAccordionItemRow(item, pocket, state));
+            if (expandedPocketItems.has(item.id)) {
+              const line = pocketItemDetailLine(item, state);
+              if (line) group.appendChild(el(`<div class="day-sub-row item-detail"><div class="detail-text">${line}</div></div>`));
+            }
+          });
+      }
+    }
+    return group;
   }
 
   function togglePaid(item, mk) {
@@ -311,63 +271,62 @@
 
   // ---------- POCKETS ----------
   function pocketsList(state) {
-    setHeader("Pockets", `<button class="icon-btn" id="add-pocket">＋</button>`);
+    setHeader("", `<button class="icon-btn" id="add-pocket">＋</button>`);
     const wrap = el(`<div></div>`);
     wrap.appendChild(monthSwitcher(state));
 
-    const pockets = DB.listPockets();
-    const allItems = pockets.flatMap((p) => DB.listPocketItems(p.id));
+    const currency = DB.getSettings().currency;
+    const txs = DB.listTransactions().filter((t) => txInMonth(t, state.month));
+    const salary = txs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+    const expense = txs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const saved = txs.filter((t) => t.type === "saving").reduce((s, t) => s + t.amount, 0);
+    const remaining = salary - expense;
 
-    const dueRows = allItems
-      .map((i) => ({ item: i, pocket: pockets.find((p) => p.id === i.pocketId), status: pocketItemStatus(i, state.month) }))
-      .filter((r) => r.status !== "paid")
-      .sort((a, b) => (a.item.dueDay || 99) - (b.item.dueDay || 99));
-
-    const billsCard = el(`<div class="card"><h2>Bills To Pay</h2></div>`);
-    if (!pockets.length) {
-      billsCard.appendChild(el(`<div class="chart-empty">No pockets yet. Create one below to track recurring bills.</div>`));
-    } else if (!dueRows.length) {
-      billsCard.appendChild(el(`<div class="chart-empty">All bills paid this month 🎉</div>`));
-    } else {
-      const list = el(`<div class="list"></div>`);
-      dueRows.forEach((r) => list.appendChild(pocketItemRow(r.item, r.pocket, state.month)));
-      billsCard.appendChild(list);
-    }
-    wrap.appendChild(billsCard);
-
-    wrap.appendChild(el(`<div class="section-title">Pockets</div>`));
-    if (!pockets.length) {
-      wrap.appendChild(el(`
-        <div class="empty-state">
-          <div class="big">💼</div>
-          <div>No pockets yet.</div>
-          <div style="font-size:13px;margin-top:4px">Create pockets like "Fixed Cost", "Investment" or "Big Spend" to track recurring monthly bills.</div>
+    const statsRow = el(`
+      <div class="pocket-stats-row">
+        <button type="button" class="pocket-stat" id="salary-stat">
+          <div class="pocket-stat-label income">Salary</div>
+          <div class="pocket-stat-value income">${formatNumber(salary)}<span class="cur">${escapeHtml(currency)}</span></div>
+        </button>
+        <div class="pocket-stat right">
+          <div class="pocket-stat-label">Monthly Expense</div>
+          <div class="pocket-stat-value">${formatNumber(expense)}<span class="cur">${escapeHtml(currency)}</span></div>
         </div>
-      `));
+      </div>
+    `);
+    statsRow.querySelector("#salary-stat").addEventListener("click", () => openTransactionForm(state, null, { type: "income" }));
+    wrap.appendChild(statsRow);
+
+    const pockets = DB.listPockets();
+    if (!pockets.length) {
+      const emptyCard = el(`
+        <div class="pocket-empty-card">
+          <button type="button" class="pocket-empty-add"><img src="icons/nav/nav-add-container.png" alt="Add pocket" /></button>
+        </div>
+      `);
+      emptyCard.querySelector(".pocket-empty-add").addEventListener("click", () => openPocketItemForm(null));
+      wrap.appendChild(emptyCard);
     } else {
-      const list = el(`<div class="list"></div>`);
-      pockets.forEach((p) => {
-        const items = DB.listPocketItems(p.id);
-        const total = items.reduce((s, i) => s + i.amount, 0);
-        const paidCount = items.filter((i) => pocketItemStatus(i, state.month) === "paid").length;
-        const row = el(`
-          <div class="row-item">
-            <div class="emoji" style="background:${p.color}22;border-radius:8px">${p.icon}</div>
-            <div class="main">
-              <div class="title">${escapeHtml(p.name)}</div>
-              <div class="sub">${items.length} bill${items.length === 1 ? "" : "s"} · ${paidCount}/${items.length} paid</div>
-            </div>
-            <div class="amt">${formatMoney(total)}</div>
-          </div>
-        `);
-        row.style.cursor = "pointer";
-        row.addEventListener("click", () => App.navigate(`#/pocket/${p.id}`));
-        list.appendChild(row);
-      });
-      wrap.appendChild(list);
+      const groups = el(`<div class="day-groups pocket-groups"></div>`);
+      pockets.forEach((pocket) => groups.appendChild(pocketGroupEl(pocket, state)));
+      const addRow = el(`
+        <div class="pocket-add-row">
+          <button type="button" class="pocket-add-btn"><img src="icons/nav/nav-add-container.png" alt="Add pocket" /></button>
+        </div>
+      `);
+      addRow.querySelector(".pocket-add-btn").addEventListener("click", () => openPocketItemForm(null));
+      groups.appendChild(addRow);
+      wrap.appendChild(groups);
     }
 
-    document.getElementById("add-pocket").addEventListener("click", () => openPocketForm());
+    wrap.appendChild(el(`
+      <div class="pocket-foot-stats">
+        <div class="pocket-foot-row"><span>Remaining</span><span class="amt remaining">${formatMoney(remaining)}</span></div>
+        <div class="pocket-foot-row"><span>Save</span><span class="amt save">${formatMoney(saved)}</span></div>
+      </div>
+    `));
+
+    document.getElementById("add-pocket").addEventListener("click", () => openPocketItemForm(null));
     return wrap;
   }
 
@@ -407,14 +366,11 @@
         App.closeSheet();
         App.render();
       });
-      const delBtn = body.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this pocket and all its bills?")) {
-          DB.deletePocket(existing.id);
-          App.closeSheet();
-          App.navigate("#/pockets");
-        }
-      });
+      wireDeleteButton(body.querySelector("#delete"), () => {
+        DB.deletePocket(existing.id);
+        App.closeSheet();
+        App.navigate("#/pockets");
+      }, "Tap again to delete");
     });
   }
 
@@ -513,96 +469,458 @@
         App.closeSheet();
         openPocketItemForm(pocket.id, item);
       });
-      body.querySelector("#delete-item").addEventListener("click", () => {
-        if (confirm("Delete this bill?")) {
-          DB.deletePocketItem(item.id);
-          App.closeSheet();
-          App.render();
-        }
-      });
+      wireDeleteButton(body.querySelector("#delete-item"), () => {
+        DB.deletePocketItem(item.id);
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
     });
   }
 
+  // pocketId may be null when creating a pocket from scratch (e.g. the
+  // Pockets list's own "+"): saving then auto-creates a new pocket, named
+  // after this bill, to hold it.
   function openPocketItemForm(pocketId, existing) {
     const kind = { v: existing && existing.kind === "saving" ? "saving" : "bill" };
     const categoryId = { v: existing ? existing.categoryId : null };
+    // Which pocket this bill belongs to. Starts as whatever was passed in
+    // (an existing item's own pocket, or the pocket you tapped "+ Add Bill"
+    // from); left unset otherwise so it can be picked explicitly.
+    const chosenPocketId = { v: pocketId || (existing ? existing.pocketId : null) };
+    const newPocketName = { v: "" };
+    const currency = DB.getSettings().currency;
+    // dueDay is a plain day-of-month (recurs every month); the calendar
+    // picker is just a friendlier way to choose it — only the day is kept.
+    const dueDay = { v: existing && existing.dueDay ? existing.dueDay : new Date().getDate() };
+    const dueDateIso = { v: Utils.dateForDay(Utils.monthKey(), dueDay.v) };
+
     function catChips() {
       return DB.listCategories(kind.v === "saving" ? "saving" : "expense")
         .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${c.icon} ${escapeHtml(c.name)}</div>`)
         .join("");
     }
-    App.openSheet(existing ? "Edit Bill" : "New Bill", `
-      <div class="field">
-        <label>Type</label>
-        <div class="seg">
-          <button type="button" class="kind-choice ${kind.v === "bill" ? "active expense" : ""}" data-v="bill">Bill</button>
-          <button type="button" class="kind-choice ${kind.v === "saving" ? "active saving" : ""}" data-v="saving">Savings Reminder</button>
+    function catIconHtml() {
+      const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+      return cat ? escapeHtml(cat.icon) : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+    }
+    function kindIcon() {
+      return kind.v === "saving" ? "icons/tx/saving.png" : "icons/tx/outcome.png";
+    }
+    function pocketChips() {
+      return DB.listPockets()
+        .map((p) => `<div class="chip pocket-choice ${p.id === chosenPocketId.v ? "active" : ""}" data-v="${p.id}">${p.icon} ${escapeHtml(p.name)}</div>`)
+        .join("");
+    }
+    function pocketRowText() {
+      if (chosenPocketId.v) {
+        const p = DB.getPocket(chosenPocketId.v);
+        return p ? escapeHtml(p.name) : "pocket";
+      }
+      if (newPocketName.v) return `${escapeHtml(newPocketName.v)} (new)`;
+      return "pocket";
+    }
+
+    App.openSheet(
+      `<div class="tx-sheet-head"><span>${existing ? "Edit pocket" : "Add pocket"}</span><button type="button" id="tx-close" class="tx-close-btn" aria-label="Close">&times;</button></div>`,
+      `
+      <div class="seg tx-type-seg">
+        <button type="button" class="kind-choice ${kind.v === "bill" ? "active" : ""}" data-v="bill">Bill</button>
+        <button type="button" class="kind-choice ${kind.v === "saving" ? "active" : ""}" data-v="saving">Saving Remainder</button>
+      </div>
+      <div class="type-hint">${kind.v === "saving" ? "Reminds you to set money aside — it won't count as spending." : "Logs a real expense to your ledger once marked paid."}</div>
+
+      <div class="tx-row" id="pk-due-row">
+        <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
+        <span class="tx-row-text" id="pk-due-label">${formatDateLong(dueDateIso.v)}</span>
+      </div>
+      ${calendarPanelHtml("pk-due", "Select due date")}
+
+      <div class="tx-row tx-amount-row" id="pk-amount-row">
+        <span class="tx-row-icon tx-icon-badge" id="pk-type-icon"><img class="tx-icon-img" src="${kindIcon()}" alt="" /></span>
+        <span class="tx-row-text">Amount</span>
+        <span class="tx-row-value" id="pk-amount-value">${existing ? formatNumber(existing.amount) : "0"} ${currency}</span>
+      </div>
+      <div class="tx-calc-panel hidden" id="pk-calc-panel">
+        ${calculatorHtml("pk-amount", existing ? existing.amount : "")}
+      </div>
+
+      <div class="tx-row" id="pk-category-row">
+        <span class="tx-row-icon tx-icon-badge" id="pk-cat-icon">${catIconHtml()}</span>
+        <span class="tx-row-text" id="pk-cat-label">category</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="pk-cat-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="pk-cat-back">‹</button><span>Select category</span></div>
+        <div class="chip-grid" id="pk-cats">${catChips()}</div>
+      </div>
+
+      <div class="tx-row" id="pk-pocket-row">
+        <span class="tx-row-icon">💼</span>
+        <span class="tx-row-text" id="pk-pocket-label">${pocketRowText()}</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="pk-pocket-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="pk-pocket-back">‹</button><span>Select pocket</span></div>
+        <div class="chip-grid" id="pk-pockets">${pocketChips()}</div>
+        <div class="tx-row tx-note-row" style="margin-top:10px">
+          <input type="text" id="pk-new-pocket" class="tx-note-input" placeholder="or type a new pocket name" />
         </div>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:5px">A Bill logs a real expense when paid. A Savings Reminder just reminds you to set money aside before spending — it won't count as spending.</div>
       </div>
-      <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Rent" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
-      <div class="field"><label>Amount</label><input type="number" id="f-amount" inputmode="decimal" value="${existing ? existing.amount : ""}" /></div>
-      <div class="field"><label>Category</label><div class="chip-grid" id="f-cats">${catChips()}</div></div>
-      <div class="field"><label>Due day of month (optional)</label><input type="number" id="f-due" min="1" max="31" value="${existing && existing.dueDay ? existing.dueDay : ""}" /></div>
-      <div class="field">
-        <label>Installments (optional)</label>
-        <input type="number" id="f-installments" min="1" placeholder="e.g. 5 — clears after 5 payments" value="${existing && existing.installments ? existing.installments : ""}" />
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Leave blank to repeat every month until you delete it. Set a number for an installment plan (e.g. a 5-month payment) that auto-clears once fully paid.</div>
+
+      <div class="tx-row tx-note-row"><input type="text" id="pk-name" class="tx-note-input" placeholder="name" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
+      <div class="tx-row tx-note-row"><input type="number" id="pk-installments" class="tx-note-input" placeholder="installments" min="1" value="${existing && existing.installments ? existing.installments : ""}" /></div>
+      <div class="tx-row tx-note-row"><input type="text" id="pk-note" class="tx-note-input" placeholder="note" value="${existing ? escapeHtml(existing.note || "") : ""}" /></div>
+
+      <div class="sheet-actions">
+        ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
+        <button class="primary" id="save">Save</button>
       </div>
-      <div class="field"><label>Note (optional)</label><textarea id="f-note">${existing ? escapeHtml(existing.note || "") : ""}</textarea></div>
-      <div class="sheet-actions"><button class="primary" id="save">Save</button></div>
-    `, (body) => {
-      function refreshCats() {
-        body.querySelector("#f-cats").innerHTML = catChips();
-        body.querySelectorAll(".cat-choice").forEach((b) => b.addEventListener("click", () => {
-          categoryId.v = b.dataset.v;
-          body.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
+    `, wire);
+
+    function wire(sheetBody) {
+      document.getElementById("tx-close").addEventListener("click", () => App.closeSheet());
+
+      const amountRow = sheetBody.querySelector("#pk-amount-row");
+      const calcPanel = sheetBody.querySelector("#pk-calc-panel");
+      const amountInput = sheetBody.querySelector("#pk-amount");
+      const amountValueEl = sheetBody.querySelector("#pk-amount-value");
+      function syncAmount() {
+        amountValueEl.textContent = `${amountInput.value || "0"} ${currency}`;
+      }
+      amountRow.addEventListener("click", () => {
+        calcPanel.classList.toggle("hidden");
+        sheetBody.querySelector("#pk-cat-panel").classList.add("hidden");
+        sheetBody.querySelector("#pk-pocket-panel").classList.add("hidden");
+      });
+      wireCalculator(sheetBody, amountInput);
+      amountInput.addEventListener("input", syncAmount);
+      syncAmount();
+
+      const dueLabel = sheetBody.querySelector("#pk-due-label");
+      wireCalendarPanel(sheetBody, "pk-due", sheetBody.querySelector("#pk-due-row"), () => dueDateIso.v, (iso) => {
+        dueDateIso.v = iso;
+        dueDay.v = Number(iso.slice(8, 10));
+        dueLabel.textContent = formatDateLong(iso);
+        sheetBody.querySelector("#pk-due-panel").classList.add("hidden");
+      });
+
+      const catRow = sheetBody.querySelector("#pk-category-row");
+      const catPanel = sheetBody.querySelector("#pk-cat-panel");
+      function updateCatRow() {
+        const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+        sheetBody.querySelector("#pk-cat-icon").innerHTML = catIconHtml();
+        sheetBody.querySelector("#pk-cat-label").textContent = cat ? cat.name : "category";
+      }
+      catRow.addEventListener("click", () => {
+        catPanel.classList.remove("hidden");
+        calcPanel.classList.add("hidden");
+        sheetBody.querySelector("#pk-pocket-panel").classList.add("hidden");
+      });
+      sheetBody.querySelector("#pk-cat-back").addEventListener("click", () => catPanel.classList.add("hidden"));
+
+      const pocketRow = sheetBody.querySelector("#pk-pocket-row");
+      const pocketPanel = sheetBody.querySelector("#pk-pocket-panel");
+      const pocketLabel = sheetBody.querySelector("#pk-pocket-label");
+      const newPocketInput = sheetBody.querySelector("#pk-new-pocket");
+      function refreshPocketChips() {
+        sheetBody.querySelector("#pk-pockets").innerHTML = pocketChips();
+        sheetBody.querySelectorAll(".pocket-choice").forEach((b) => b.addEventListener("click", () => {
+          chosenPocketId.v = b.dataset.v;
+          newPocketName.v = "";
+          newPocketInput.value = "";
+          sheetBody.querySelectorAll(".pocket-choice").forEach((x) => x.classList.remove("active"));
           b.classList.add("active");
+          pocketLabel.textContent = pocketRowText();
+          pocketPanel.classList.add("hidden");
         }));
       }
-      body.querySelectorAll(".kind-choice").forEach((b) => b.addEventListener("click", () => {
+      pocketRow.addEventListener("click", () => {
+        refreshPocketChips();
+        pocketPanel.classList.remove("hidden");
+        calcPanel.classList.add("hidden");
+        catPanel.classList.add("hidden");
+      });
+      sheetBody.querySelector("#pk-pocket-back").addEventListener("click", () => pocketPanel.classList.add("hidden"));
+      newPocketInput.addEventListener("input", (e) => {
+        newPocketName.v = e.target.value.trim();
+        if (newPocketName.v) chosenPocketId.v = null;
+        sheetBody.querySelectorAll(".pocket-choice").forEach((x) => x.classList.remove("active"));
+        pocketLabel.textContent = pocketRowText();
+      });
+
+      function refreshCats() {
+        sheetBody.querySelector("#pk-cats").innerHTML = catChips();
+        sheetBody.querySelectorAll(".cat-choice").forEach((b) => b.addEventListener("click", () => {
+          categoryId.v = b.dataset.v;
+          sheetBody.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
+          b.classList.add("active");
+          updateCatRow();
+          catPanel.classList.add("hidden");
+        }));
+      }
+      sheetBody.querySelectorAll(".kind-choice").forEach((b) => b.addEventListener("click", () => {
         kind.v = b.dataset.v;
         categoryId.v = null;
-        body.querySelectorAll(".kind-choice").forEach((x) => x.classList.remove("active", "expense", "saving"));
-        b.classList.add("active", kind.v === "saving" ? "saving" : "expense");
+        sheetBody.querySelectorAll(".kind-choice").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        sheetBody.querySelector(".type-hint").textContent = kind.v === "saving"
+          ? "Reminds you to set money aside — it won't count as spending."
+          : "Logs a real expense to your ledger once marked paid.";
+        sheetBody.querySelector("#pk-type-icon img").src = kindIcon();
         refreshCats();
+        updateCatRow();
       }));
       refreshCats();
-      body.querySelector("#save").addEventListener("click", () => {
-        const name = body.querySelector("#f-name").value.trim();
-        const amount = Number(body.querySelector("#f-amount").value);
-        if (!name || !amount) return App.toast("Enter name and amount");
-        const dueRaw = body.querySelector("#f-due").value;
-        const installRaw = body.querySelector("#f-installments").value;
-        const note = body.querySelector("#f-note").value.trim();
+      updateCatRow();
+
+      sheetBody.querySelector("#save").addEventListener("click", () => {
+        const name = sheetBody.querySelector("#pk-name").value.trim();
+        const amount = readAmountValue(amountInput);
+        if (!name || !amount || isNaN(amount)) return App.toast("Enter name and amount");
+        const installRaw = sheetBody.querySelector("#pk-installments").value;
         const payload = {
           name,
           amount,
           kind: kind.v,
           categoryId: categoryId.v,
-          dueDay: dueRaw ? Number(dueRaw) : null,
+          dueDay: dueDay.v,
           installments: installRaw ? Number(installRaw) : null,
-          note,
+          note: sheetBody.querySelector("#pk-note").value.trim(),
         };
+        // Resolve which pocket this goes into: an existing one you picked,
+        // a brand-new one under the typed (or, failing that, the bill's own)
+        // name, or — when editing — whatever's currently chosen.
+        let targetPocketId = chosenPocketId.v;
+        if (!targetPocketId) {
+          const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+          const color = POCKET_COLORS[DB.listPockets().length % POCKET_COLORS.length];
+          targetPocketId = DB.addPocket({ name: newPocketName.v || name, icon: cat ? cat.icon : (kind.v === "saving" ? "🐷" : "💼"), color }).id;
+        }
+        payload.pocketId = targetPocketId;
         if (existing) {
           DB.updatePocketItem(existing.id, payload);
         } else {
-          DB.addPocketItem(Object.assign({ pocketId }, payload));
+          DB.addPocketItem(payload);
         }
         App.closeSheet();
         App.render();
       });
-    });
+      wireDeleteButton(sheetBody.querySelector("#delete"), () => {
+        DB.deletePocketItem(existing.id);
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
+    }
   }
 
   // ---------- TRANSACTION FORM (with optional receipt/OCR pre-fill) ----------
   let activeTxSheetBody = null;
 
+  // Small left-to-right calculator: numbers separated by + - × ÷, with × ÷
+  // applied immediately (proper precedence) and + - terms summed at the end.
+  // No parentheses — this is a quick "50+89" style helper, not a full calculator.
+  function evalCalcExpr(expr) {
+    const tokens = expr.match(/(\d+\.?\d*|[+\-×÷])/g);
+    if (!tokens || !tokens.length || isNaN(parseFloat(tokens[0]))) return null;
+    let result = parseFloat(tokens[0]);
+    let i = 1;
+    while (i < tokens.length - 1) {
+      const op = tokens[i];
+      const num = parseFloat(tokens[i + 1]);
+      if (isNaN(num)) break;
+      if (op === "×") result *= num;
+      else if (op === "÷") result = num !== 0 ? result / num : result;
+      else if (op === "+") result += num;
+      else if (op === "-") result -= num;
+      i += 2;
+    }
+    return result;
+  }
+
+  function calculatorHtml(id, initialValue) {
+    return `
+      <input type="text" id="${id}" class="amount-display" inputmode="none" placeholder="0" autocomplete="off"
+        value="${initialValue != null && initialValue !== "" ? initialValue : ""}" />
+      <div class="calc-grid">
+        <button type="button" class="calc-key" data-k="7">7</button>
+        <button type="button" class="calc-key" data-k="8">8</button>
+        <button type="button" class="calc-key" data-k="9">9</button>
+        <button type="button" class="calc-key op" data-k="÷">÷</button>
+        <button type="button" class="calc-key" data-k="4">4</button>
+        <button type="button" class="calc-key" data-k="5">5</button>
+        <button type="button" class="calc-key" data-k="6">6</button>
+        <button type="button" class="calc-key op" data-k="×">×</button>
+        <button type="button" class="calc-key" data-k="1">1</button>
+        <button type="button" class="calc-key" data-k="2">2</button>
+        <button type="button" class="calc-key" data-k="3">3</button>
+        <button type="button" class="calc-key op" data-k="-">−</button>
+        <button type="button" class="calc-key" data-k="0">0</button>
+        <button type="button" class="calc-key" data-k=".">.</button>
+        <button type="button" class="calc-key fn" data-k="back">⌫</button>
+        <button type="button" class="calc-key op" data-k="+">+</button>
+        <button type="button" class="calc-key fn wide" data-k="clear">C</button>
+        <button type="button" class="calc-key eq wide" data-k="=">=</button>
+      </div>
+    `;
+  }
+
+  function wireCalculator(container, inputEl) {
+    container.querySelectorAll(".calc-key").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.k;
+        let v = inputEl.value;
+        if (k === "clear") {
+          v = "";
+        } else if (k === "back") {
+          v = v.slice(0, -1);
+        } else if (k === "=") {
+          const result = evalCalcExpr(v);
+          if (result != null && isFinite(result)) v = String(Math.round(result * 100) / 100);
+        } else if (k === "+" || k === "-" || k === "×" || k === "÷") {
+          if (!v) return; // can't lead with an operator
+          v = /[+\-×÷]$/.test(v) ? v.slice(0, -1) + k : v + k;
+        } else if (k === ".") {
+          const lastSegment = v.split(/[+\-×÷]/).pop();
+          if (lastSegment.includes(".")) return;
+          v = v + k;
+        } else {
+          v = v + k;
+        }
+        inputEl.value = v;
+        inputEl.dispatchEvent(new Event("input"));
+      });
+    });
+    inputEl.addEventListener("input", () => {
+      inputEl.value = inputEl.value.replace(/[^0-9+\-×÷.*/]/g, "").replace(/\*/g, "×").replace(/\//g, "÷");
+    });
+  }
+
+  // Reads the amount field's final numeric value, evaluating an unfinished
+  // expression (e.g. "50+89") automatically if the user never pressed "=".
+  function readAmountValue(inputEl) {
+    const v = inputEl.value.trim();
+    if (!v) return NaN;
+    if (/[+\-×÷]/.test(v)) {
+      const result = evalCalcExpr(v);
+      return result != null ? result : NaN;
+    }
+    return parseFloat(v);
+  }
+
+  const TYPE_HINTS = {
+    saving: "Saving is money you set aside — it won't count as spending in your totals.",
+    transfer: "Transfer is money moving between your own accounts/pockets — it won't count as spending or income.",
+  };
+  const TYPE_ICONS = {
+    expense: "icons/tx/outcome.png",
+    income: "icons/tx/income.png",
+    saving: "icons/tx/saving.png",
+    transfer: "icons/tx/transfer.png",
+  };
+
+  // A small self-contained month-grid calendar popup, used in place of the
+  // native <input type=date> picker — some WebViews (notably the Android
+  // Capacitor wrapper) don't reliably pop up a real calendar UI for it, so
+  // rolling our own guarantees the same picker everywhere.
+  function calendarPanelHtml(idPrefix, title) {
+    return `
+      <div class="tx-panel hidden" id="${idPrefix}-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="${idPrefix}-back">‹</button><span>${title}</span></div>
+        <div class="cal-nav">
+          <button type="button" class="icon-btn" id="${idPrefix}-prev">‹</button>
+          <span class="cal-label" id="${idPrefix}-cal-label"></span>
+          <button type="button" class="icon-btn" id="${idPrefix}-next">›</button>
+        </div>
+        <div class="cal-dow"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+        <div class="cal-grid" id="${idPrefix}-grid"></div>
+      </div>
+    `;
+  }
+
+  // Wires up a calendar panel built by calendarPanelHtml. `getSelectedIso`
+  // supplies the currently-selected date (or null) each time the panel opens
+  // and is redrawn; `onPick(iso)` fires when a day is tapped.
+  function wireCalendarPanel(sheetBody, idPrefix, rowEl, getSelectedIso, onPick) {
+    const panel = sheetBody.querySelector(`#${idPrefix}-panel`);
+    const label = sheetBody.querySelector(`#${idPrefix}-cal-label`);
+    const grid = sheetBody.querySelector(`#${idPrefix}-grid`);
+    let viewDate = new Date(`${getSelectedIso() || todayISO()}T00:00:00`);
+    viewDate.setDate(1);
+
+    function draw() {
+      label.textContent = viewDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+      const y = viewDate.getFullYear();
+      const m = viewDate.getMonth();
+      const startDow = new Date(y, m, 1).getDay();
+      const daysInMonth = new Date(y, m + 1, 0).getDate();
+      const selectedIso = getSelectedIso();
+      const todayIso = todayISO();
+      let html = "";
+      for (let i = 0; i < startDow; i++) html += `<span class="cal-cell empty"></span>`;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const iso = `${y}-${pad2(m + 1)}-${pad2(d)}`;
+        const cls = ["cal-cell"];
+        if (iso === selectedIso) cls.push("selected");
+        if (iso === todayIso) cls.push("today");
+        html += `<button type="button" class="${cls.join(" ")}" data-iso="${iso}">${d}</button>`;
+      }
+      grid.innerHTML = html;
+      grid.querySelectorAll("[data-iso]").forEach((btn) => btn.addEventListener("click", () => onPick(btn.dataset.iso)));
+    }
+
+    sheetBody.querySelector(`#${idPrefix}-prev`).addEventListener("click", () => { viewDate.setMonth(viewDate.getMonth() - 1); draw(); });
+    sheetBody.querySelector(`#${idPrefix}-next`).addEventListener("click", () => { viewDate.setMonth(viewDate.getMonth() + 1); draw(); });
+    sheetBody.querySelector(`#${idPrefix}-back`).addEventListener("click", () => panel.classList.add("hidden"));
+    rowEl.addEventListener("click", () => {
+      viewDate = new Date(`${getSelectedIso() || todayISO()}T00:00:00`);
+      viewDate.setDate(1);
+      draw();
+      sheetBody.querySelectorAll(".tx-panel, .tx-calc-panel").forEach((p) => { if (p !== panel) p.classList.add("hidden"); });
+      panel.classList.remove("hidden");
+    });
+  }
+
+  // window.confirm() is unreliable across WebViews — it silently no-ops in
+  // some (including, per a user report, the Android app wrapper), so every
+  // delete button uses this tap-twice-to-confirm pattern instead.
+  function wireDeleteButton(btn, onConfirm, label) {
+    if (!btn) return;
+    const original = btn.textContent;
+    let confirming = false;
+    let revertTimer;
+    btn.addEventListener("click", () => {
+      if (!confirming) {
+        confirming = true;
+        btn.textContent = label || "Tap again to confirm";
+        revertTimer = setTimeout(() => {
+          confirming = false;
+          btn.textContent = original;
+        }, 3000);
+        return;
+      }
+      clearTimeout(revertTimer);
+      onConfirm();
+    });
+  }
+
+  const RECUR_FREQS = { weekly: "week", biweekly: "2 weeks", monthly: "month" };
+  function recurringLabelText(v) {
+    if (!v) return "Recurring";
+    return `Every ${RECUR_FREQS[v.freq] || v.freq} from ${formatDateLong(v.nextDate)}`;
+  }
+
   function openTransactionForm(state, existing, ocr) {
     ocr = ocr || {};
-    const type = { v: existing ? existing.type : "expense" };
+    const type = { v: existing ? existing.type : (ocr.type || "expense") };
     const categoryId = { v: existing ? existing.categoryId : null };
-    const pockets = DB.listPockets();
+    const date = { v: existing ? existing.date : todayISO() };
+    // Old shape was a bare ISO date string; normalize to {freq, nextDate}.
+    const existingRecurring = existing && existing.recurring && typeof existing.recurring === "object" ? existing.recurring : null;
+    const recurring = { v: existingRecurring };
+    // Payee isn't shown in the UI anymore, but it's kept as a hidden value so
+    // OCR-detected payees (and the category-memory they drive) still work.
+    const payee = existing ? (existing.payee || "") : (ocr.payee || "");
+    const currency = DB.getSettings().currency;
 
     function categoryChips() {
       return DB.listCategories(type.v)
@@ -610,33 +928,81 @@
         .join("");
     }
 
+    // Selected categories keep their own emoji icon; with none chosen yet,
+    // fall back to the generic category glyph.
+    function catIconHtml() {
+      const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+      return cat ? escapeHtml(cat.icon) : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+    }
+
     const receiptImage = ocr.receiptImage || (existing ? existing.receiptImage : null);
     const receiptHtml = receiptImage
       ? `<div class="receipt-preview"><img src="${receiptImage}" alt="Receipt" />${ocr.scanning ? `<div class="ocr-status" id="ocr-status">🔍 Scanning photo for the amount…</div>` : ""}</div>`
       : "";
 
-    App.openSheet(existing ? "Edit Transaction" : "Add Transaction", `
+    App.openSheet(
+      `<div class="tx-sheet-head"><span>${existing ? "Edit transaction" : "Add transaction"}</span><button type="button" id="tx-close" class="tx-close-btn" aria-label="Close">&times;</button></div>`,
+      `
       ${receiptHtml}
-      <div class="field">
-        <div class="seg">
-          <button type="button" class="type-choice ${type.v === "expense" ? "active expense" : ""}" data-v="expense">Expense</button>
-          <button type="button" class="type-choice ${type.v === "income" ? "active income" : ""}" data-v="income">Income</button>
-          <button type="button" class="type-choice ${type.v === "saving" ? "active saving" : ""}" data-v="saving">Saving</button>
+      <div class="seg seg-4 tx-type-seg">
+        <button type="button" class="type-choice ${type.v === "expense" ? "active" : ""}" data-v="expense">outcome</button>
+        <button type="button" class="type-choice ${type.v === "income" ? "active" : ""}" data-v="income">income</button>
+        <button type="button" class="type-choice ${type.v === "saving" ? "active" : ""}" data-v="saving">saving</button>
+        <button type="button" class="type-choice ${type.v === "transfer" ? "active" : ""}" data-v="transfer">transfers</button>
+      </div>
+      <div id="type-hint" class="type-hint">${TYPE_HINTS[type.v] || ""}</div>
+
+      <div class="tx-row" id="tx-date-row">
+        <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
+        <span class="tx-row-text" id="tx-date-label">${formatDateLong(date.v)}</span>
+      </div>
+      ${calendarPanelHtml("tx-date", "Select date")}
+
+      <div class="tx-row tx-amount-row" id="tx-amount-row">
+        <span class="tx-row-icon tx-icon-badge" id="tx-type-icon"><img class="tx-icon-img" src="${TYPE_ICONS[type.v]}" alt="" /></span>
+        <span class="tx-row-text">Amount</span>
+        <span class="tx-row-value" id="f-amount-value">0 ${currency}</span>
+      </div>
+      <div class="tx-calc-panel hidden" id="tx-calc-panel">
+        ${calculatorHtml("f-amount", existing ? existing.amount : "")}
+      </div>
+
+      <div class="tx-row" id="tx-category-row">
+        <span class="tx-row-icon tx-icon-badge" id="tx-cat-icon">${catIconHtml()}</span>
+        <span class="tx-row-text" id="tx-cat-label">category</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="tx-cat-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="tx-cat-back">‹</button><span>Select category</span></div>
+        <div class="chip-grid" id="f-cats">${categoryChips()}</div>
+      </div>
+
+      <div class="tx-row tx-note-row">
+        <input type="text" id="f-note" class="tx-note-input" placeholder="note" value="${existing ? escapeHtml(existing.note || "") : (ocr.receiptImage ? "Imported from slip photo" : "")}" />
+      </div>
+
+      <div class="tx-row" id="tx-recurring-row">
+        <img class="tx-row-icon" src="icons/tx/recurring.png" alt="" />
+        <span class="tx-row-text" id="tx-recurring-label">${recurringLabelText(recurring.v)}</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="tx-recurring-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="tx-recurring-back">‹</button><span>Recurring</span></div>
+        <div class="seg tx-type-seg" id="tx-freq-seg">
+          <button type="button" class="freq-choice" data-v="weekly">Weekly</button>
+          <button type="button" class="freq-choice" data-v="biweekly">2 weeks</button>
+          <button type="button" class="freq-choice" data-v="monthly">Monthly</button>
         </div>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:5px">Saving is money you set aside — it won't count as spending in your totals.</div>
+        <div class="cal-nav">
+          <button type="button" class="icon-btn" id="tx-recurring-prev">‹</button>
+          <span class="cal-label" id="tx-recurring-cal-label"></span>
+          <button type="button" class="icon-btn" id="tx-recurring-next">›</button>
+        </div>
+        <div class="cal-dow"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+        <div class="cal-grid" id="tx-recurring-grid"></div>
+        <button type="button" class="secondary danger tx-recurring-clear" id="tx-recurring-clear">Turn off recurring</button>
       </div>
-      <div class="field"><label>Amount</label><input type="number" id="f-amount" inputmode="decimal" value="${existing ? existing.amount : ""}" /></div>
-      <div class="field"><label>Date</label><input type="date" id="f-date" value="${existing ? existing.date : todayISO()}" /></div>
-      <div class="field"><label>Category</label><div class="chip-grid" id="f-cats">${categoryChips()}</div></div>
-      <div class="field"><label>Pocket (optional)</label>
-        <select id="f-pocket">
-          <option value="">None</option>
-          ${pockets.map((p) => `<option value="${p.id}" ${existing && existing.pocketId === p.id ? "selected" : ""}>${p.icon} ${escapeHtml(p.name)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field"><label>Payee / Recipient (optional)</label><input type="text" id="f-payee" value="${existing ? escapeHtml(existing.payee || "") : escapeHtml(ocr.payee || "")}" placeholder="e.g. 7-Eleven" /><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Future slips from the same payee will reuse whatever category you pick here.</div></div>
-      <div class="field"><label>Tag (optional)</label><input type="text" id="f-tag" value="${existing ? escapeHtml(existing.tag || "") : ""}" placeholder="e.g. groceries" /></div>
-      <div class="field"><label>Note (optional)</label><textarea id="f-note">${existing ? escapeHtml(existing.note || "") : (ocr.receiptImage ? "Imported from slip photo" : "")}</textarea></div>
+
       <div class="sheet-actions">
         ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
         <button class="primary" id="save">Save</button>
@@ -646,6 +1012,81 @@
     function wire(sheetBody) {
       activeTxSheetBody = sheetBody;
       if (receiptImage) sheetBody.dataset.receiptImage = receiptImage;
+      sheetBody.dataset.payee = payee;
+
+      document.getElementById("tx-close").addEventListener("click", () => {
+        activeTxSheetBody = null;
+        App.closeSheet();
+      });
+
+      // Amount row: tap to reveal the calculator; keep the row's own display
+      // (and the type-colored icon badge) in sync with whatever it computes.
+      const amountRow = sheetBody.querySelector("#tx-amount-row");
+      const calcPanel = sheetBody.querySelector("#tx-calc-panel");
+      const amountInput = sheetBody.querySelector("#f-amount");
+      const amountValueEl = sheetBody.querySelector("#f-amount-value");
+      function syncAmountDisplay() {
+        amountValueEl.textContent = `${amountInput.value || "0"} ${currency}`;
+      }
+      amountRow.addEventListener("click", () => {
+        calcPanel.classList.toggle("hidden");
+        sheetBody.querySelector("#tx-cat-panel").classList.add("hidden");
+      });
+      wireCalculator(sheetBody, amountInput);
+      amountInput.addEventListener("input", syncAmountDisplay);
+      syncAmountDisplay();
+
+      // Date row: opens a custom calendar popup (a native <input type=date>
+      // picker isn't reliable across WebViews, notably the Android app).
+      const dateLabel = sheetBody.querySelector("#tx-date-label");
+      wireCalendarPanel(sheetBody, "tx-date", sheetBody.querySelector("#tx-date-row"), () => date.v, (iso) => {
+        date.v = iso;
+        dateLabel.textContent = formatDateLong(iso);
+        sheetBody.querySelector("#tx-date-panel").classList.add("hidden");
+      });
+      // Lets OCR (outside this closure) push a detected date into the same state.
+      sheetBody.__setDate = (iso) => {
+        date.v = iso;
+        dateLabel.textContent = formatDateLong(iso);
+      };
+
+      // Recurring row: same calendar popup, plus a frequency choice. Picking a
+      // day finalizes both; "Turn off recurring" clears it.
+      const recurringLabel = sheetBody.querySelector("#tx-recurring-label");
+      let freqChoice = (recurring.v && recurring.v.freq) || "monthly";
+      const freqButtons = sheetBody.querySelectorAll("#tx-freq-seg .freq-choice");
+      function paintFreqButtons() {
+        freqButtons.forEach((b) => b.classList.toggle("active", b.dataset.v === freqChoice));
+      }
+      freqButtons.forEach((b) => b.addEventListener("click", () => {
+        freqChoice = b.dataset.v;
+        paintFreqButtons();
+      }));
+      paintFreqButtons();
+      wireCalendarPanel(sheetBody, "tx-recurring", sheetBody.querySelector("#tx-recurring-row"), () => recurring.v && recurring.v.nextDate, (iso) => {
+        recurring.v = { freq: freqChoice, nextDate: iso };
+        recurringLabel.textContent = recurringLabelText(recurring.v);
+        sheetBody.querySelector("#tx-recurring-panel").classList.add("hidden");
+      });
+      sheetBody.querySelector("#tx-recurring-clear").addEventListener("click", () => {
+        recurring.v = null;
+        recurringLabel.textContent = recurringLabelText(null);
+        sheetBody.querySelector("#tx-recurring-panel").classList.add("hidden");
+      });
+
+      // Category row: tap to swap the main rows out for a picker panel.
+      const catRow = sheetBody.querySelector("#tx-category-row");
+      const catPanel = sheetBody.querySelector("#tx-cat-panel");
+      function updateCatRow() {
+        const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+        sheetBody.querySelector("#tx-cat-icon").innerHTML = catIconHtml();
+        sheetBody.querySelector("#tx-cat-label").textContent = cat ? cat.name : "category";
+      }
+      catRow.addEventListener("click", () => {
+        catPanel.classList.remove("hidden");
+        calcPanel.classList.add("hidden");
+      });
+      sheetBody.querySelector("#tx-cat-back").addEventListener("click", () => catPanel.classList.add("hidden"));
 
       function refreshCats() {
         sheetBody.querySelector("#f-cats").innerHTML = categoryChips();
@@ -653,31 +1094,35 @@
           categoryId.v = b.dataset.v;
           sheetBody.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
           b.classList.add("active");
+          updateCatRow();
+          catPanel.classList.add("hidden");
         }));
       }
       sheetBody.querySelectorAll(".type-choice").forEach((b) => b.addEventListener("click", () => {
         type.v = b.dataset.v;
         categoryId.v = null;
-        sheetBody.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving"));
-        b.classList.add("active", type.v);
+        sheetBody.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        sheetBody.querySelector("#type-hint").textContent = TYPE_HINTS[type.v] || "";
+        sheetBody.querySelector("#tx-type-icon img").src = TYPE_ICONS[type.v];
         refreshCats();
+        updateCatRow();
       }));
       refreshCats();
+      updateCatRow();
 
       sheetBody.querySelector("#save").addEventListener("click", () => {
-        const amount = Number(sheetBody.querySelector("#f-amount").value);
-        const date = sheetBody.querySelector("#f-date").value || todayISO();
-        if (!amount) return App.toast("Enter an amount");
+        const amount = readAmountValue(amountInput);
+        if (!amount || isNaN(amount)) return App.toast("Enter an amount");
         const payload = {
           type: type.v,
           amount,
-          date,
+          date: date.v,
           categoryId: categoryId.v,
-          pocketId: sheetBody.querySelector("#f-pocket").value || null,
-          payee: sheetBody.querySelector("#f-payee").value.trim(),
-          tag: sheetBody.querySelector("#f-tag").value.trim(),
+          payee: sheetBody.dataset.payee || "",
           note: sheetBody.querySelector("#f-note").value.trim(),
           receiptImage: sheetBody.dataset.receiptImage || null,
+          recurring: recurring.v || null,
         };
         if (existing) {
           DB.updateTransaction(existing.id, payload);
@@ -687,16 +1132,14 @@
         activeTxSheetBody = null;
         App.closeSheet();
         App.render();
+        runRecurringTransactions();
       });
-      const delBtn = sheetBody.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this transaction?")) {
-          DB.deleteTransaction(existing.id);
-          activeTxSheetBody = null;
-          App.closeSheet();
-          App.render();
-        }
-      });
+      wireDeleteButton(sheetBody.querySelector("#delete"), () => {
+        DB.deleteTransaction(existing.id);
+        activeTxSheetBody = null;
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
     }
   }
 
@@ -704,13 +1147,15 @@
     if (!activeTxSheetBody || !document.body.contains(activeTxSheetBody)) return;
     const statusEl = activeTxSheetBody.querySelector("#ocr-status");
     if (result.amount) {
-      activeTxSheetBody.querySelector("#f-amount").value = result.amount;
+      const amountInput = activeTxSheetBody.querySelector("#f-amount");
+      amountInput.value = result.amount;
+      amountInput.dispatchEvent(new Event("input"));
     }
-    if (result.date) {
-      activeTxSheetBody.querySelector("#f-date").value = result.date;
+    if (result.date && activeTxSheetBody.__setDate) {
+      activeTxSheetBody.__setDate(result.date);
     }
     if (result.payee) {
-      activeTxSheetBody.querySelector("#f-payee").value = result.payee;
+      activeTxSheetBody.dataset.payee = result.payee;
       const rememberedCat = DB.findCategoryForPayee(result.payee);
       if (rememberedCat) {
         const chip = activeTxSheetBody.querySelector(`.cat-choice[data-v="${rememberedCat}"]`);
@@ -725,6 +1170,47 @@
         statusEl.textContent = "Couldn't auto-detect the amount — please enter it manually.";
       }
     }
+  }
+
+  function addRecurInterval(iso, freq) {
+    const d = new Date(iso + "T00:00:00");
+    if (freq === "weekly") d.setDate(d.getDate() + 7);
+    else if (freq === "biweekly") d.setDate(d.getDate() + 14);
+    else d.setMonth(d.getMonth() + 1); // monthly (also the fallback for unknown freqs)
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+
+  // Runs on app open (and right after saving a transaction) — the app has no
+  // background process, so "automatic" recurring transactions only actually
+  // get created the next time someone has the app open. For each transaction
+  // with a recurring rule whose next-due date has arrived, logs a new
+  // transaction for that date and advances the rule to the following one;
+  // loops (capped) to catch up if the app wasn't opened for a while.
+  function runRecurringTransactions() {
+    const today = todayISO();
+    let loggedAny = false;
+    DB.listTransactions().forEach((t) => {
+      if (!t.recurring || !t.recurring.nextDate) return;
+      let rule = t.recurring;
+      let guard = 0;
+      while (rule.nextDate <= today && guard < 104) {
+        const dueDate = rule.nextDate;
+        DB.addTransaction({
+          date: dueDate,
+          type: t.type,
+          amount: t.amount,
+          categoryId: t.categoryId,
+          payee: t.payee,
+          note: t.note,
+          autoLogged: true,
+        });
+        rule = { freq: rule.freq, nextDate: addRecurInterval(dueDate, rule.freq) };
+        guard++;
+        loggedAny = true;
+      }
+      if (guard > 0) DB.updateTransaction(t.id, { recurring: rule });
+    });
+    return loggedAny;
   }
 
   function blobToResizedDataUrl(blob, maxW) {
@@ -872,35 +1358,6 @@
     });
     wrap.appendChild(generalCard);
 
-    const incomeCard = el(`<div class="card"><h2>Recurring Income</h2></div>`);
-    const recurring = DB.listRecurringIncomes();
-    if (!recurring.length) {
-      incomeCard.appendChild(el(`<div class="chart-empty">No recurring income yet, e.g. a monthly salary.</div>`));
-    } else {
-      const list = el(`<div class="list"></div>`);
-      recurring.forEach((r) => {
-        const cat = r.categoryId ? categoryById(r.categoryId) : null;
-        const row = el(`
-          <div class="row-item">
-            <div class="emoji">${cat ? cat.icon : "💰"}</div>
-            <div class="main">
-              <div class="title">${escapeHtml(r.name)}</div>
-              <div class="sub">${r.dueDay ? "usually by day " + r.dueDay : "no fixed day"}</div>
-            </div>
-            <div class="amt income">${formatMoney(r.amount)}</div>
-          </div>
-        `);
-        row.style.cursor = "pointer";
-        row.addEventListener("click", () => openRecurringIncomeForm(r));
-        list.appendChild(row);
-      });
-      incomeCard.appendChild(list);
-    }
-    const addIncomeBtn = el(`<button class="secondary" style="width:100%;margin-top:12px">＋ Add Recurring Income</button>`);
-    addIncomeBtn.addEventListener("click", () => openRecurringIncomeForm());
-    incomeCard.appendChild(addIncomeBtn);
-    wrap.appendChild(incomeCard);
-
     const isNativeApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins && window.Capacitor.Plugins.GalleryScan);
 
     if (isNativeApp) {
@@ -969,7 +1426,7 @@
     `));
 
     const catCard = el(`<div class="card"><h2>Categories</h2></div>`);
-    ["income", "expense", "saving"].forEach((t) => {
+    ["income", "expense", "saving", "transfer"].forEach((t) => {
       catCard.appendChild(el(`<div class="section-title" style="margin-top:6px">${t}</div>`));
       const grid = el(`<div class="chip-grid"></div>`);
       DB.listCategories(t).forEach((c) => {
@@ -1000,63 +1457,14 @@
     dataCard.querySelector("#export-btn").addEventListener("click", exportData);
     dataCard.querySelector("#import-btn").addEventListener("click", () => dataCard.querySelector("#import-file").click());
     dataCard.querySelector("#import-file").addEventListener("change", importData);
-    dataCard.querySelector("#reset-btn").addEventListener("click", () => {
-      if (confirm("This will permanently delete all data. Continue?")) {
-        DB.reset();
-        App.toast("All data reset");
-        App.navigate("#/dashboard");
-      }
-    });
+    wireDeleteButton(dataCard.querySelector("#reset-btn"), () => {
+      DB.reset();
+      App.toast("All data reset");
+      App.navigate("#/dashboard");
+    }, "Tap again to erase everything");
     wrap.appendChild(dataCard);
 
     return wrap;
-  }
-
-  function openRecurringIncomeForm(existing) {
-    const categoryId = { v: existing ? existing.categoryId : null };
-    function catChips() {
-      return DB.listCategories("income")
-        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${c.icon} ${escapeHtml(c.name)}</div>`)
-        .join("");
-    }
-    App.openSheet(existing ? "Edit Recurring Income" : "New Recurring Income", `
-      <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Salary" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
-      <div class="field"><label>Amount</label><input type="number" id="f-amount" inputmode="decimal" value="${existing ? existing.amount : ""}" /></div>
-      <div class="field"><label>Category</label><div class="chip-grid" id="f-cats">${catChips()}</div></div>
-      <div class="field"><label>Usually received by day (optional)</label><input type="number" id="f-due" min="1" max="31" value="${existing && existing.dueDay ? existing.dueDay : ""}" /></div>
-      <div class="sheet-actions">
-        ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
-        <button class="primary" id="save">Save</button>
-      </div>
-    `, (body) => {
-      body.querySelectorAll(".cat-choice").forEach((b) => b.addEventListener("click", () => {
-        categoryId.v = b.dataset.v;
-        body.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-      }));
-      body.querySelector("#save").addEventListener("click", () => {
-        const name = body.querySelector("#f-name").value.trim();
-        const amount = Number(body.querySelector("#f-amount").value);
-        if (!name || !amount) return App.toast("Enter name and amount");
-        const dueRaw = body.querySelector("#f-due").value;
-        const payload = { name, amount, categoryId: categoryId.v, dueDay: dueRaw ? Number(dueRaw) : null };
-        if (existing) {
-          DB.updateRecurringIncome(existing.id, payload);
-        } else {
-          DB.addRecurringIncome(payload);
-        }
-        App.closeSheet();
-        App.render();
-      });
-      const delBtn = body.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this recurring income?")) {
-          DB.deleteRecurringIncome(existing.id);
-          App.closeSheet();
-          App.render();
-        }
-      });
-    });
   }
 
   function exportData() {
@@ -1097,6 +1505,7 @@
           <button type="button" class="type-choice ${type.v === "expense" ? "active expense" : ""}" data-v="expense">Expense</button>
           <button type="button" class="type-choice ${type.v === "income" ? "active income" : ""}" data-v="income">Income</button>
           <button type="button" class="type-choice ${type.v === "saving" ? "active saving" : ""}" data-v="saving">Saving</button>
+          <button type="button" class="type-choice ${type.v === "transfer" ? "active transfer" : ""}" data-v="transfer">Transfer</button>
         </div>
       </div>
       <div class="field"><label>Icon (emoji)</label><input type="text" id="f-icon" value="${existing ? existing.icon : "🏷️"}" maxlength="4" /></div>
@@ -1108,7 +1517,7 @@
     `, (body) => {
       body.querySelectorAll(".type-choice").forEach((b) => b.addEventListener("click", () => {
         type.v = b.dataset.v;
-        body.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving"));
+        body.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving", "transfer"));
         b.classList.add("active", type.v);
       }));
       body.querySelector("#save").addEventListener("click", () => {
@@ -1123,14 +1532,11 @@
         App.closeSheet();
         App.render();
       });
-      const delBtn = body.querySelector("#delete");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        if (confirm("Delete this category?")) {
-          DB.deleteCategory(existing.id);
-          App.closeSheet();
-          App.render();
-        }
-      });
+      wireDeleteButton(body.querySelector("#delete"), () => {
+        DB.deleteCategory(existing.id);
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
     });
   }
 
@@ -1144,5 +1550,6 @@
     handleSharedPhoto,
     autoLogSlip,
     blobToResizedDataUrl,
+    runRecurringTransactions,
   };
 })();

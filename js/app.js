@@ -13,11 +13,16 @@
     settings: () => window.Views.settings(state),
   };
 
+  // 5 tabs per the wireframe: Home, Pockets, Add (center), Settings, and a 5th
+  // slot — using Stats for now since that's the natural home for the panels
+  // that got pulled off of Home (This Month, Expense by Category, Overview,
+  // Recurring Income); swap it out once the final placement is decided.
   const NAV = [
-    { route: "dashboard", icon: "🏠", label: "Home" },
-    { route: "pockets", icon: "💼", label: "Pockets" },
-    { route: "stats", icon: "📊", label: "Stats" },
-    { route: "settings", icon: "⚙️", label: "Settings" },
+    { route: "dashboard", img: "icons/nav/nav-home.png", label: "Home" },
+    { route: "pockets", img: "icons/nav/nav-wallet.png", label: "Pocket" },
+    { action: "add", img: "icons/nav/nav-add-container.png", label: "Add" },
+    { route: "stats", img: "icons/nav/nav-history.png", label: "History" },
+    { route: "settings", img: "icons/nav/nav-settings.png", label: "Settings" },
   ];
 
   function parseHash() {
@@ -34,12 +39,9 @@
     const content = fn(arg);
     if (content) main.appendChild(content);
 
-    document.querySelectorAll("nav.bottom-nav a").forEach((a) => {
+    document.querySelectorAll("nav.bottom-nav a[data-route]").forEach((a) => {
       a.classList.toggle("active", a.dataset.route === name || (name === "pocket" && a.dataset.route === "pockets"));
     });
-
-    const fab = document.getElementById("fab");
-    fab.style.display = name === "dashboard" ? "block" : "none";
 
     window.scrollTo(0, 0);
   }
@@ -103,12 +105,16 @@
         <div class="actions"></div>
       </header>
       <main id="main-content"></main>
-      <button id="fab" class="fab" title="Add transaction">+</button>
       <nav class="bottom-nav">
-        ${NAV.map((n) => `<a href="#/${n.route}" data-route="${n.route}"><span class="ic">${n.icon}</span>${n.label}</a>`).join("")}
+        ${NAV.map((n) =>
+          n.action === "add"
+            ? `<a href="#" id="nav-add"><img class="nav-ic-add" src="${n.img}" alt="${n.label}"></a>`
+            : `<a href="#/${n.route}" data-route="${n.route}"><span class="nav-ic" role="img" aria-label="${n.label}" style="-webkit-mask-image:url('${n.img}');mask-image:url('${n.img}')"></span></a>`
+        ).join("")}
       </nav>
     `;
-    document.getElementById("fab").addEventListener("click", () => {
+    document.getElementById("nav-add").addEventListener("click", (e) => {
+      e.preventDefault();
       window.Views.openTransactionForm(state);
     });
   }
@@ -242,6 +248,7 @@
     if (scanInFlight) return;
     scanInFlight = true;
     try {
+      if (window.Views.runRecurringTransactions()) render();
       await checkPendingSharedPhoto();
       await checkNativeGallery();
     } finally {
