@@ -528,6 +528,11 @@
   function openPocketItemForm(pocketId, existing) {
     const kind = { v: existing && existing.kind === "saving" ? "saving" : "bill" };
     const categoryId = { v: existing ? existing.categoryId : null };
+    // Which pocket this bill belongs to. Starts as whatever was passed in
+    // (an existing item's own pocket, or the pocket you tapped "+ Add Bill"
+    // from); left unset otherwise so it can be picked explicitly.
+    const chosenPocketId = { v: pocketId || (existing ? existing.pocketId : null) };
+    const newPocketName = { v: "" };
     const currency = DB.getSettings().currency;
     // dueDay is a plain day-of-month (recurs every month); the calendar
     // picker is just a friendlier way to choose it — only the day is kept.
@@ -545,6 +550,19 @@
     }
     function kindIcon() {
       return kind.v === "saving" ? "icons/tx/saving.png" : "icons/tx/outcome.png";
+    }
+    function pocketChips() {
+      return DB.listPockets()
+        .map((p) => `<div class="chip pocket-choice ${p.id === chosenPocketId.v ? "active" : ""}" data-v="${p.id}">${p.icon} ${escapeHtml(p.name)}</div>`)
+        .join("");
+    }
+    function pocketRowText() {
+      if (chosenPocketId.v) {
+        const p = DB.getPocket(chosenPocketId.v);
+        return p ? escapeHtml(p.name) : "pocket";
+      }
+      if (newPocketName.v) return `${escapeHtml(newPocketName.v)} (new)`;
+      return "pocket";
     }
 
     App.openSheet(
@@ -581,6 +599,19 @@
         <div class="chip-grid" id="pk-cats">${catChips()}</div>
       </div>
 
+      <div class="tx-row" id="pk-pocket-row">
+        <span class="tx-row-icon">💼</span>
+        <span class="tx-row-text" id="pk-pocket-label">${pocketRowText()}</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="pk-pocket-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="pk-pocket-back">‹</button><span>Select pocket</span></div>
+        <div class="chip-grid" id="pk-pockets">${pocketChips()}</div>
+        <div class="tx-row tx-note-row" style="margin-top:10px">
+          <input type="text" id="pk-new-pocket" class="tx-note-input" placeholder="or type a new pocket name" />
+        </div>
+      </div>
+
       <div class="tx-row tx-note-row"><input type="text" id="pk-name" class="tx-note-input" placeholder="name" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
       <div class="tx-row tx-note-row"><input type="number" id="pk-installments" class="tx-note-input" placeholder="installments" min="1" value="${existing && existing.installments ? existing.installments : ""}" /></div>
       <div class="tx-row tx-note-row"><input type="text" id="pk-note" class="tx-note-input" placeholder="note" value="${existing ? escapeHtml(existing.note || "") : ""}" /></div>
@@ -604,6 +635,7 @@
       amountRow.addEventListener("click", () => {
         calcPanel.classList.toggle("hidden");
         sheetBody.querySelector("#pk-cat-panel").classList.add("hidden");
+        sheetBody.querySelector("#pk-pocket-panel").classList.add("hidden");
       });
       wireCalculator(sheetBody, amountInput);
       amountInput.addEventListener("input", syncAmount);
@@ -627,8 +659,39 @@
       catRow.addEventListener("click", () => {
         catPanel.classList.remove("hidden");
         calcPanel.classList.add("hidden");
+        sheetBody.querySelector("#pk-pocket-panel").classList.add("hidden");
       });
       sheetBody.querySelector("#pk-cat-back").addEventListener("click", () => catPanel.classList.add("hidden"));
+
+      const pocketRow = sheetBody.querySelector("#pk-pocket-row");
+      const pocketPanel = sheetBody.querySelector("#pk-pocket-panel");
+      const pocketLabel = sheetBody.querySelector("#pk-pocket-label");
+      const newPocketInput = sheetBody.querySelector("#pk-new-pocket");
+      function refreshPocketChips() {
+        sheetBody.querySelector("#pk-pockets").innerHTML = pocketChips();
+        sheetBody.querySelectorAll(".pocket-choice").forEach((b) => b.addEventListener("click", () => {
+          chosenPocketId.v = b.dataset.v;
+          newPocketName.v = "";
+          newPocketInput.value = "";
+          sheetBody.querySelectorAll(".pocket-choice").forEach((x) => x.classList.remove("active"));
+          b.classList.add("active");
+          pocketLabel.textContent = pocketRowText();
+          pocketPanel.classList.add("hidden");
+        }));
+      }
+      pocketRow.addEventListener("click", () => {
+        refreshPocketChips();
+        pocketPanel.classList.remove("hidden");
+        calcPanel.classList.add("hidden");
+        catPanel.classList.add("hidden");
+      });
+      sheetBody.querySelector("#pk-pocket-back").addEventListener("click", () => pocketPanel.classList.add("hidden"));
+      newPocketInput.addEventListener("input", (e) => {
+        newPocketName.v = e.target.value.trim();
+        if (newPocketName.v) chosenPocketId.v = null;
+        sheetBody.querySelectorAll(".pocket-choice").forEach((x) => x.classList.remove("active"));
+        pocketLabel.textContent = pocketRowText();
+      });
 
       function refreshCats() {
         sheetBody.querySelector("#pk-cats").innerHTML = catChips();
@@ -669,16 +732,20 @@
           installments: installRaw ? Number(installRaw) : null,
           note: sheetBody.querySelector("#pk-note").value.trim(),
         };
+        // Resolve which pocket this goes into: an existing one you picked,
+        // a brand-new one under the typed (or, failing that, the bill's own)
+        // name, or — when editing — whatever's currently chosen.
+        let targetPocketId = chosenPocketId.v;
+        if (!targetPocketId) {
+          const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+          const color = POCKET_COLORS[DB.listPockets().length % POCKET_COLORS.length];
+          targetPocketId = DB.addPocket({ name: newPocketName.v || name, icon: cat ? cat.icon : (kind.v === "saving" ? "🐷" : "💼"), color }).id;
+        }
+        payload.pocketId = targetPocketId;
         if (existing) {
           DB.updatePocketItem(existing.id, payload);
         } else {
-          let targetPocketId = pocketId;
-          if (!targetPocketId) {
-            const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
-            const color = POCKET_COLORS[DB.listPockets().length % POCKET_COLORS.length];
-            targetPocketId = DB.addPocket({ name, icon: cat ? cat.icon : (kind.v === "saving" ? "🐷" : "💼"), color }).id;
-          }
-          DB.addPocketItem(Object.assign({ pocketId: targetPocketId }, payload));
+          DB.addPocketItem(payload);
         }
         App.closeSheet();
         App.render();
