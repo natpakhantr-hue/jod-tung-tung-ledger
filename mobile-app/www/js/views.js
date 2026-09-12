@@ -330,7 +330,7 @@
     const statsRow = el(`
       <div class="pocket-stats-row">
         <button type="button" class="pocket-stat" id="salary-stat">
-          <div class="pocket-stat-label income">Salary</div>
+          <div class="pocket-stat-label income">Income</div>
           <div class="pocket-stat-value income">${formatNumber(salary)}<span class="cur">${escapeHtml(currency)}</span></div>
         </button>
         <div class="pocket-stat right">

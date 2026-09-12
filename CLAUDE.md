@@ -81,11 +81,12 @@ errors for you.
   container (`DB.pockets`); each holds one or more **Pocket Items** (`DB.pocketItems`),
   which are recurring bills or savings reminders. Pockets' own stats are deliberately
   computed differently from Home's:
-  - *Salary* = this month's `income`-type transactions (tap it to quick-add one).
+  - *Income* (label; internal var is still `salary`) = this month's `income`-type
+    transactions (tap it to quick-add one).
   - *Monthly Expense* = sum of every pocket item's `amount` where `kind !== "saving"`
     — the **total monthly obligation**, regardless of whether it's been paid yet this
     month. Not the same number as Home's Monthly Expense.
-  - *Remaining* = Salary − (pocket bills + pocket savings). Not a net-of-everything
+  - *Remaining* = Income − (pocket bills + pocket savings). Not a net-of-everything
     figure — ad-hoc non-pocket transactions don't touch it.
   - *Save* = sum of pocket items where `kind === "saving"`.
   - Marking a bill/reminder paid (the ✓ toggle) **does** create a real transaction in
