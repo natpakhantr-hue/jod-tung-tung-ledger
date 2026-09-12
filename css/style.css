@@ -367,6 +367,45 @@ nav.bottom-nav .nav-ic-add {
 .row-item .amt.transfer { color: var(--accent, #3bd1ff); }
 .day-groups-spacer { height: 28px; background: var(--day-row-bg); }
 
+/* ---- Pockets page ---- */
+.pocket-stats-row { display: flex; justify-content: space-between; align-items: flex-start; margin: 4px 2px 16px; gap: 12px; }
+.pocket-stat { background: none; border: none; padding: 0; margin: 0; text-align: left; font-family: inherit; cursor: default; }
+.pocket-stat.right { text-align: right; margin-left: auto; }
+#salary-stat { cursor: pointer; }
+.pocket-stat-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.pocket-stat-label.income { color: var(--income); }
+.pocket-stat-value { font-size: 26px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.pocket-stat-value.income { color: var(--income); }
+.pocket-stat-value .cur { font-size: 16px; font-weight: 600; margin-left: 3px; opacity: .8; }
+
+.pocket-groups { margin-bottom: 18px; }
+.pocket-head { cursor: pointer; }
+.pocket-head-right { display: flex; align-items: center; gap: 10px; }
+.check-btn {
+  width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(255,255,255,.15); color: rgba(255,255,255,.55);
+  font-size: 11px; font-weight: 700; line-height: 20px; text-align: center; padding: 0; cursor: pointer; flex: none;
+}
+.check-btn.paid { background: var(--income); color: #fff; }
+.pocket-toggle, .item-toggle {
+  background: none; border: none; color: inherit; opacity: .75; font-size: 13px; cursor: pointer; padding: 0 2px; flex: none;
+}
+.item-row .item-actions { display: flex; align-items: center; gap: 10px; }
+.item-detail, .item-empty { cursor: default; }
+.item-detail { padding-top: 0; padding-bottom: 14px; }
+.item-detail .detail-text { font-size: 11.5px; opacity: .7; padding-left: 46px; }
+.item-empty .sub { font-size: 12.5px; opacity: .75; }
+
+.pocket-foot-stats { margin: 18px 4px 4px; display: flex; flex-direction: column; gap: 10px; }
+.pocket-foot-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700;
+}
+.pocket-foot-row .amt {
+  font-size: 22px; font-weight: 800; text-transform: none; letter-spacing: 0; color: var(--text); font-variant-numeric: tabular-nums;
+}
+.pocket-foot-row .amt.remaining { color: #f5a524; }
+.pocket-foot-row .amt.save { color: var(--accent); }
+
 .chart-empty { color: var(--text-muted); font-size: 13.5px; padding: 20px 0; text-align: center; }
 .chart-row { display: flex; align-items: center; gap: 16px; }
 .legend { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }

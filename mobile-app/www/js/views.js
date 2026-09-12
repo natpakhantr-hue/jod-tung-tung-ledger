@@ -185,29 +185,102 @@
     return isSaving ? "Not saved" : "Unpaid";
   }
 
-  function pocketItemRow(item, pocket, mk) {
-    const status = pocketItemStatus(item, mk);
-    const isSaving = item.kind === "saving";
-    const pillClass = status === "paid" ? "paid" : status === "overdue" ? "overdue" : "unpaid";
-    const pillText = billStatusLabel(status, isSaving);
+  // Pockets list: which pockets/bills are currently expanded in the
+  // accordion. Lives at module scope (not per-render) so it survives the
+  // full re-render that toggling paid state or expand/collapse triggers.
+  const expandedPockets = new Set();
+  const expandedPocketItems = new Set();
+
+  function pocketItemDetailLine(item, state) {
+    const parts = [];
+    if (item.installments) parts.push(`${paidMonthsCount(item)}/${item.installments} paid`);
+    if (item.dueDay) parts.push(`due date ${formatDateLong(Utils.dateForDay(state.month, item.dueDay))}`);
+    return parts.join(" · ");
+  }
+
+  // A bill/saving-reminder row inside an expanded pocket: check to toggle
+  // paid, amount, and its own arrow to reveal installment/due-date detail.
+  function pocketAccordionItemRow(item, pocket, state) {
+    const isPaid = pocketItemStatus(item, state.month) === "paid";
     const cat = item.categoryId ? categoryById(item.categoryId) : null;
-    const installBadge = item.installments ? `<span class="pill installment">${paidMonthsCount(item)}/${item.installments}</span>` : "";
-    const kindBadge = isSaving ? `<span class="pill installment">🐷 Reminder</span>` : "";
+    const isExpanded = expandedPocketItems.has(item.id);
+    const currency = DB.getSettings().currency;
+    const icon = cat ? cat.icon : item.kind === "saving" ? "🐷" : pocket.icon;
     const row = el(`
-      <div class="row-item">
-        <div class="emoji">${cat ? cat.icon : isSaving ? "🐷" : pocket ? pocket.icon : "💼"}</div>
-        <div class="main">
-          <div class="title">${escapeHtml(item.name)}</div>
-          <div class="sub">${pocket ? escapeHtml(pocket.name) : ""}${item.dueDay ? " · due " + item.dueDay : ""} · <span class="pill ${pillClass}">${pillText}</span> ${installBadge} ${kindBadge}</div>
-        </div>
-        <div style="text-align:right">
-          <div class="amt">${formatMoney(item.amount)}</div>
+      <div class="day-sub-row item-row">
+        <div class="emoji">${icon}</div>
+        <div class="main"><div class="title">${escapeHtml(item.name)}</div></div>
+        <div class="item-actions">
+          <button type="button" class="check-btn ${isPaid ? "paid" : ""}">✓</button>
+          <span class="amt">${formatNumber(item.amount)} ${escapeHtml(currency)}</span>
+          <button type="button" class="item-toggle">${isExpanded ? "▾" : "▴"}</button>
         </div>
       </div>
     `);
-    row.style.cursor = "pointer";
-    row.addEventListener("click", () => togglePaid(item, mk));
+    row.querySelector(".check-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePaid(item, state.month);
+    });
+    row.querySelector(".item-toggle").addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (isExpanded) expandedPocketItems.delete(item.id);
+      else expandedPocketItems.add(item.id);
+      App.render();
+    });
+    row.addEventListener("click", () => openPocketItemActions(item, pocket, state.month));
     return row;
+  }
+
+  // A pocket as a collapsible group: collapsed shows one summary row (paid
+  // check + total + arrow); expanded shows the pocket name as a header
+  // followed by each bill's own row.
+  function pocketGroupEl(pocket, state) {
+    const items = DB.listPocketItems(pocket.id);
+    const total = items.reduce((s, i) => s + i.amount, 0);
+    const allPaid = items.length > 0 && items.every((i) => pocketItemStatus(i, state.month) === "paid");
+    const isExpanded = expandedPockets.has(pocket.id);
+    const currency = DB.getSettings().currency;
+
+    const group = el(`<div class="day-group pocket-group"></div>`);
+    const header = el(`
+      <div class="day-header-row pocket-head">
+        <span>${escapeHtml(pocket.name)}</span>
+        <span class="pocket-head-right"></span>
+      </div>
+    `);
+    header.querySelector(".pocket-head-right").innerHTML = isExpanded
+      ? `<button type="button" class="pocket-toggle">▾</button>`
+      : `
+        <span class="check-btn ${allPaid ? "paid" : ""}" style="pointer-events:none">✓</span>
+        <span class="amt">${formatNumber(total)} ${escapeHtml(currency)}</span>
+        <button type="button" class="pocket-toggle">▴</button>
+      `;
+    header.querySelector(".pocket-toggle").addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (isExpanded) expandedPockets.delete(pocket.id);
+      else expandedPockets.add(pocket.id);
+      App.render();
+    });
+    header.addEventListener("click", () => App.navigate(`#/pocket/${pocket.id}`));
+    group.appendChild(header);
+
+    if (isExpanded) {
+      if (!items.length) {
+        group.appendChild(el(`<div class="day-sub-row item-empty"><div class="main"><div class="sub">No bills in this pocket yet.</div></div></div>`));
+      } else {
+        items
+          .slice()
+          .sort((a, b) => (a.dueDay || 99) - (b.dueDay || 99))
+          .forEach((item) => {
+            group.appendChild(pocketAccordionItemRow(item, pocket, state));
+            if (expandedPocketItems.has(item.id)) {
+              const line = pocketItemDetailLine(item, state);
+              if (line) group.appendChild(el(`<div class="day-sub-row item-detail"><div class="detail-text">${line}</div></div>`));
+            }
+          });
+      }
+    }
+    return group;
   }
 
   function togglePaid(item, mk) {
@@ -250,61 +323,53 @@
 
   // ---------- POCKETS ----------
   function pocketsList(state) {
-    setHeader("Pockets", `<button class="icon-btn" id="add-pocket">＋</button>`);
+    setHeader("", `<button class="icon-btn" id="add-pocket">＋</button>`);
     const wrap = el(`<div></div>`);
     wrap.appendChild(monthSwitcher(state));
 
+    const currency = DB.getSettings().currency;
+    const txs = DB.listTransactions().filter((t) => txInMonth(t, state.month));
+    const salary = txs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+    const expense = txs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const saved = txs.filter((t) => t.type === "saving").reduce((s, t) => s + t.amount, 0);
+    const remaining = salary - expense;
+
+    const statsRow = el(`
+      <div class="pocket-stats-row">
+        <button type="button" class="pocket-stat" id="salary-stat">
+          <div class="pocket-stat-label income">Salary</div>
+          <div class="pocket-stat-value income">${formatNumber(salary)}<span class="cur">${escapeHtml(currency)}</span></div>
+        </button>
+        <div class="pocket-stat right">
+          <div class="pocket-stat-label">Monthly Expense</div>
+          <div class="pocket-stat-value">${formatNumber(expense)}<span class="cur">${escapeHtml(currency)}</span></div>
+        </div>
+      </div>
+    `);
+    statsRow.querySelector("#salary-stat").addEventListener("click", () => openTransactionForm(state, null, { type: "income" }));
+    wrap.appendChild(statsRow);
+
     const pockets = DB.listPockets();
-    const allItems = pockets.flatMap((p) => DB.listPocketItems(p.id));
-
-    const dueRows = allItems
-      .map((i) => ({ item: i, pocket: pockets.find((p) => p.id === i.pocketId), status: pocketItemStatus(i, state.month) }))
-      .filter((r) => r.status !== "paid")
-      .sort((a, b) => (a.item.dueDay || 99) - (b.item.dueDay || 99));
-
-    const billsCard = el(`<div class="card"><h2>Bills To Pay</h2></div>`);
-    if (!pockets.length) {
-      billsCard.appendChild(el(`<div class="chart-empty">No pockets yet. Create one below to track recurring bills.</div>`));
-    } else if (!dueRows.length) {
-      billsCard.appendChild(el(`<div class="chart-empty">All bills paid this month 🎉</div>`));
-    } else {
-      const list = el(`<div class="list"></div>`);
-      dueRows.forEach((r) => list.appendChild(pocketItemRow(r.item, r.pocket, state.month)));
-      billsCard.appendChild(list);
-    }
-    wrap.appendChild(billsCard);
-
-    wrap.appendChild(el(`<div class="section-title">Pockets</div>`));
     if (!pockets.length) {
       wrap.appendChild(el(`
         <div class="empty-state">
           <div class="big">💼</div>
           <div>No pockets yet.</div>
-          <div style="font-size:13px;margin-top:4px">Create pockets like "Fixed Cost", "Investment" or "Big Spend" to track recurring monthly bills.</div>
+          <div style="font-size:13px;margin-top:4px">Tap + above to create one, e.g. "Fixed Cost" or "Big Spend", to track recurring monthly bills.</div>
         </div>
       `));
     } else {
-      const list = el(`<div class="list"></div>`);
-      pockets.forEach((p) => {
-        const items = DB.listPocketItems(p.id);
-        const total = items.reduce((s, i) => s + i.amount, 0);
-        const paidCount = items.filter((i) => pocketItemStatus(i, state.month) === "paid").length;
-        const row = el(`
-          <div class="row-item">
-            <div class="emoji" style="background:${p.color}22;border-radius:8px">${p.icon}</div>
-            <div class="main">
-              <div class="title">${escapeHtml(p.name)}</div>
-              <div class="sub">${items.length} bill${items.length === 1 ? "" : "s"} · ${paidCount}/${items.length} paid</div>
-            </div>
-            <div class="amt">${formatMoney(total)}</div>
-          </div>
-        `);
-        row.style.cursor = "pointer";
-        row.addEventListener("click", () => App.navigate(`#/pocket/${p.id}`));
-        list.appendChild(row);
-      });
-      wrap.appendChild(list);
+      const groups = el(`<div class="day-groups pocket-groups"></div>`);
+      pockets.forEach((pocket) => groups.appendChild(pocketGroupEl(pocket, state)));
+      wrap.appendChild(groups);
     }
+
+    wrap.appendChild(el(`
+      <div class="pocket-foot-stats">
+        <div class="pocket-foot-row"><span>Remaining</span><span class="amt remaining">${formatMoney(remaining)}</span></div>
+        <div class="pocket-foot-row"><span>Save</span><span class="amt save">${formatMoney(saved)}</span></div>
+      </div>
+    `));
 
     document.getElementById("add-pocket").addEventListener("click", () => openPocketForm());
     return wrap;
@@ -727,7 +792,7 @@
 
   function openTransactionForm(state, existing, ocr) {
     ocr = ocr || {};
-    const type = { v: existing ? existing.type : "expense" };
+    const type = { v: existing ? existing.type : (ocr.type || "expense") };
     const categoryId = { v: existing ? existing.categoryId : null };
     const date = { v: existing ? existing.date : todayISO() };
     // Old shape was a bare ISO date string; normalize to {freq, nextDate}.
