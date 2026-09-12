@@ -200,6 +200,7 @@
       if (!unseen.length) return;
 
       let logged = 0;
+      let needsReview = 0;
       let unreadable = 0;
       for (const img of unseen) {
         const id = photoIdFromUri(img.uri);
@@ -208,7 +209,8 @@
           const blob = await (await fetch("data:image/jpeg;base64," + base64)).blob();
           const dataUrl = await window.Views.blobToResizedDataUrl(blob, 900);
           const result = await window.Views.autoLogSlip(dataUrl);
-          if (result.logged) logged++;
+          if (result.needsReview) needsReview++;
+          else if (result.logged) logged++;
           else unreadable++;
         } catch (e) {
           unreadable++;
@@ -216,11 +218,12 @@
         DB.markPhotoScanned(id);
       }
 
-      if (logged) render();
-      if (logged || unreadable) {
+      if (logged || needsReview) render();
+      if (logged || needsReview || unreadable) {
         const parts = [];
         if (logged) parts.push(`${logged} slip${logged === 1 ? "" : "s"} logged automatically`);
-        if (unreadable) parts.push(`${unreadable} photo${unreadable === 1 ? "" : "s"} skipped (no amount found)`);
+        if (needsReview) parts.push(`${needsReview} logged with no amount — please check`);
+        if (unreadable) parts.push(`${unreadable} photo${unreadable === 1 ? "" : "s"} skipped`);
         toast(parts.join(" · "));
       }
     } catch (e) {

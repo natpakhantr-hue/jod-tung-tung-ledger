@@ -118,7 +118,8 @@ errors for you.
 
 - **Transaction**: `type` (expense/income/saving/transfer), `amount`, `categoryId`,
   `date`, `note`, `payee`, `pocketId`/`pocketItemId` (set when it came from a bill),
-  `recurring` (`{freq, nextDate}` or `null`), `autoLogged` (bool), `receiptImage`.
+  `recurring` (`{freq, nextDate}` or `null`), `autoLogged` (bool), `needsReview`
+  (bool — a slip auto-scan that found no amount; see below), `receiptImage`.
 - **Pocket**: `id`, `name`, `icon`, `color`.
 - **Pocket Item**: `pocketId`, `name`, `amount`, `dueDay` (plain day-of-month,
   nullable — recurs every month, not a fixed calendar date), `categoryId`,
@@ -128,6 +129,14 @@ errors for you.
 `autoLogged: true` on a transaction means: don't show the 🤖-style note/clutter on
 its Home statement row (see `dashboard()`'s row rendering) — it's set for recurring-
 engine transactions, OCR slip-scan auto-logs, and bill/auto-debit payments alike.
+
+The native gallery auto-scan (`autoLogSlip()`) never silently drops a slip it can't
+read: when OCR finds no amount, it still logs a ฿0 transaction with `needsReview:
+true` (and a note explaining why) instead of skipping it, so nothing vanishes
+unnoticed. `needsReview` is the one exception to the `autoLogged` note-suppression
+rule above — its row always shows the note and a ⚠️ icon — and gets cleared the
+moment the user edits and saves it with a real amount (`openTransactionForm`'s save
+handler always sets `needsReview: false`).
 
 ## UI conventions to reuse, not reinvent
 

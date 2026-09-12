@@ -105,12 +105,14 @@
             // Auto-logged rows (bill payments, recurring, slip scans) skip the
             // note — it's just boilerplate ("Rent", "Auto-logged from slip
             // photo") that repeats what the category/pocket already show.
-            if (t.note && !t.autoLogged) subParts.push(escapeHtml(t.note));
+            // Flagged-for-review rows are the exception: the note is the only
+            // place explaining why this one needs a second look.
+            if (t.note && (!t.autoLogged || t.needsReview)) subParts.push(escapeHtml(t.note));
             const row = el(`
               <div class="day-sub-row">
                 <div class="emoji">${c ? c.icon : fallbackIcon}</div>
                 <div class="main">
-                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}</div>
+                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.needsReview ? " ⚠️" : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
                 </div>
                 <div class="amt ${t.type}">${amtSign}${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
@@ -1199,6 +1201,9 @@
           note: sheetBody.querySelector("#f-note").value.trim(),
           receiptImage: sheetBody.dataset.receiptImage || null,
           recurring: recurring.v || null,
+          // Saving through this form — with a real amount, since that's
+          // required above — counts as having reviewed a flagged slip.
+          needsReview: false,
         };
         if (existing) {
           DB.updateTransaction(existing.id, payload);
@@ -1338,7 +1343,23 @@
   async function autoLogSlip(dataUrl) {
     try {
       const result = await OCR.scanReceipt(dataUrl);
-      if (!result.amount) return { logged: false };
+      if (!result.amount) {
+        // Couldn't read an amount off this one (often a slip with no QR/total
+        // block Tesseract can latch onto) — log a ฿0 placeholder flagged for
+        // review instead of silently dropping the slip, so it isn't lost.
+        DB.addTransaction({
+          date: result.date || todayISO(),
+          type: "expense",
+          amount: 0,
+          categoryId: defaultAutoCategoryId(),
+          payee: result.payee || "",
+          note: "Slip photo — no amount detected, please check",
+          receiptImage: dataUrl,
+          autoLogged: true,
+          needsReview: true,
+        });
+        return { logged: true, needsReview: true };
+      }
       const categoryId = (result.payee && DB.findCategoryForPayee(result.payee)) || defaultAutoCategoryId();
       DB.addTransaction({
         date: result.date || todayISO(),

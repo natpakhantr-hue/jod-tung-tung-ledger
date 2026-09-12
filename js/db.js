@@ -16,14 +16,22 @@
       categories: [
         { id: uid(), name: "Salary", icon: "💰", type: "income" },
         { id: uid(), name: "Bonus", icon: "🎁", type: "income" },
-        { id: uid(), name: "Investment", icon: "📈", type: "income" },
-        { id: uid(), name: "Other Income", icon: "➕", type: "income" },
+        { id: uid(), name: "Profit", icon: "📈", type: "income" },
+        { id: uid(), name: "Freelance", icon: "💻", type: "income" },
+        { id: uid(), name: "Other", icon: "➕", type: "income" },
         { id: uid(), name: "Food", icon: "🍜", type: "expense" },
-        { id: uid(), name: "Transport", icon: "🚗", type: "expense" },
+        { id: uid(), name: "Transport", icon: "🚌", type: "expense" },
         { id: uid(), name: "Shopping", icon: "🛒", type: "expense" },
         { id: uid(), name: "Health", icon: "🏥", type: "expense" },
         { id: uid(), name: "Entertainment", icon: "🎬", type: "expense" },
         { id: uid(), name: "Bills", icon: "🧾", type: "expense" },
+        { id: uid(), name: "Sport", icon: "⚽", type: "expense" },
+        { id: uid(), name: "Car", icon: "🚗", type: "expense" },
+        { id: uid(), name: "Invest", icon: "💹", type: "expense" },
+        { id: uid(), name: "Job & Business", icon: "💼", type: "expense" },
+        { id: uid(), name: "Utilities", icon: "💡", type: "expense" },
+        { id: uid(), name: "Necessary", icon: "🧴", type: "expense" },
+        { id: uid(), name: "Give", icon: "💝", type: "expense" },
         { id: uid(), name: "Other", icon: "📦", type: "expense" },
         { id: uid(), name: "Savings", icon: "🐷", type: "saving" },
         { id: uid(), name: "Transfer", icon: "🔁", type: "transfer" },
@@ -195,6 +203,7 @@
         payee: tx.payee || "",
         recurring: tx.recurring || null,
         autoLogged: !!tx.autoLogged,
+        needsReview: !!tx.needsReview,
       };
       data.transactions.push(t);
       persist();
