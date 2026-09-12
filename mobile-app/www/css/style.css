@@ -414,6 +414,13 @@ nav.bottom-nav .nav-ic-add {
 .pocket-empty-add { border: none; background: none; padding: 0; cursor: pointer; width: 72px; }
 .pocket-empty-add img { width: 100%; height: auto; display: block; }
 
+.pocket-add-row {
+  display: flex; align-items: center; justify-content: center;
+  padding: 14px 16px; background: var(--day-row-bg); margin-top: 2px;
+}
+.pocket-add-btn { border: none; background: none; padding: 0; cursor: pointer; width: 44px; }
+.pocket-add-btn img { width: 100%; height: auto; display: block; }
+
 .chart-empty { color: var(--text-muted); font-size: 13.5px; padding: 20px 0; text-align: center; }
 .chart-row { display: flex; align-items: center; gap: 16px; }
 .legend { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }

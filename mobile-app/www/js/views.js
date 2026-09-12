@@ -361,6 +361,13 @@
     } else {
       const groups = el(`<div class="day-groups pocket-groups"></div>`);
       pockets.forEach((pocket) => groups.appendChild(pocketGroupEl(pocket, state)));
+      const addRow = el(`
+        <div class="pocket-add-row">
+          <button type="button" class="pocket-add-btn"><img src="icons/nav/nav-add-container.png" alt="Add pocket" /></button>
+        </div>
+      `);
+      addRow.querySelector(".pocket-add-btn").addEventListener("click", () => openPocketItemForm(null));
+      groups.appendChild(addRow);
       wrap.appendChild(groups);
     }
 
