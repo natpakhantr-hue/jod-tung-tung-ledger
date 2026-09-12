@@ -351,13 +351,13 @@
 
     const pockets = DB.listPockets();
     if (!pockets.length) {
-      wrap.appendChild(el(`
-        <div class="empty-state">
-          <div class="big">💼</div>
-          <div>No pockets yet.</div>
-          <div style="font-size:13px;margin-top:4px">Tap + above to create one, e.g. "Fixed Cost" or "Big Spend", to track recurring monthly bills.</div>
+      const emptyCard = el(`
+        <div class="pocket-empty-card">
+          <button type="button" class="pocket-empty-add"><img src="icons/nav/nav-add-container.png" alt="Add pocket" /></button>
         </div>
-      `));
+      `);
+      emptyCard.querySelector(".pocket-empty-add").addEventListener("click", () => openPocketItemForm(null));
+      wrap.appendChild(emptyCard);
     } else {
       const groups = el(`<div class="day-groups pocket-groups"></div>`);
       pockets.forEach((pocket) => groups.appendChild(pocketGroupEl(pocket, state)));
@@ -371,7 +371,7 @@
       </div>
     `));
 
-    document.getElementById("add-pocket").addEventListener("click", () => openPocketForm());
+    document.getElementById("add-pocket").addEventListener("click", () => openPocketItemForm(null));
     return wrap;
   }
 
@@ -522,76 +522,173 @@
     });
   }
 
+  // pocketId may be null when creating a pocket from scratch (e.g. the
+  // Pockets list's own "+"): saving then auto-creates a new pocket, named
+  // after this bill, to hold it.
   function openPocketItemForm(pocketId, existing) {
     const kind = { v: existing && existing.kind === "saving" ? "saving" : "bill" };
     const categoryId = { v: existing ? existing.categoryId : null };
+    const currency = DB.getSettings().currency;
+    // dueDay is a plain day-of-month (recurs every month); the calendar
+    // picker is just a friendlier way to choose it — only the day is kept.
+    const dueDay = { v: existing && existing.dueDay ? existing.dueDay : new Date().getDate() };
+    const dueDateIso = { v: Utils.dateForDay(Utils.monthKey(), dueDay.v) };
+
     function catChips() {
       return DB.listCategories(kind.v === "saving" ? "saving" : "expense")
         .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${c.icon} ${escapeHtml(c.name)}</div>`)
         .join("");
     }
-    App.openSheet(existing ? "Edit Bill" : "New Bill", `
-      <div class="field">
-        <label>Type</label>
-        <div class="seg">
-          <button type="button" class="kind-choice ${kind.v === "bill" ? "active expense" : ""}" data-v="bill">Bill</button>
-          <button type="button" class="kind-choice ${kind.v === "saving" ? "active saving" : ""}" data-v="saving">Savings Reminder</button>
-        </div>
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:5px">A Bill logs a real expense when paid. A Savings Reminder just reminds you to set money aside before spending — it won't count as spending.</div>
+    function catIconHtml() {
+      const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+      return cat ? escapeHtml(cat.icon) : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+    }
+    function kindIcon() {
+      return kind.v === "saving" ? "icons/tx/saving.png" : "icons/tx/outcome.png";
+    }
+
+    App.openSheet(
+      `<div class="tx-sheet-head"><span>${existing ? "Edit pocket" : "Add pocket"}</span><button type="button" id="tx-close" class="tx-close-btn" aria-label="Close">&times;</button></div>`,
+      `
+      <div class="seg tx-type-seg">
+        <button type="button" class="kind-choice ${kind.v === "bill" ? "active" : ""}" data-v="bill">Bill</button>
+        <button type="button" class="kind-choice ${kind.v === "saving" ? "active" : ""}" data-v="saving">Saving Remainder</button>
       </div>
-      <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Rent" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
-      <div class="field"><label>Amount</label><input type="number" id="f-amount" inputmode="decimal" value="${existing ? existing.amount : ""}" /></div>
-      <div class="field"><label>Category</label><div class="chip-grid" id="f-cats">${catChips()}</div></div>
-      <div class="field"><label>Due day of month (optional)</label><input type="number" id="f-due" min="1" max="31" value="${existing && existing.dueDay ? existing.dueDay : ""}" /></div>
-      <div class="field">
-        <label>Installments (optional)</label>
-        <input type="number" id="f-installments" min="1" placeholder="e.g. 5 — clears after 5 payments" value="${existing && existing.installments ? existing.installments : ""}" />
-        <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Leave blank to repeat every month until you delete it. Set a number for an installment plan (e.g. a 5-month payment) that auto-clears once fully paid.</div>
+      <div class="type-hint">${kind.v === "saving" ? "Reminds you to set money aside — it won't count as spending." : "Logs a real expense to your ledger once marked paid."}</div>
+
+      <div class="tx-row" id="pk-due-row">
+        <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
+        <span class="tx-row-text" id="pk-due-label">${formatDateLong(dueDateIso.v)}</span>
       </div>
-      <div class="field"><label>Note (optional)</label><textarea id="f-note">${existing ? escapeHtml(existing.note || "") : ""}</textarea></div>
-      <div class="sheet-actions"><button class="primary" id="save">Save</button></div>
-    `, (body) => {
+      ${calendarPanelHtml("pk-due", "Select due date")}
+
+      <div class="tx-row tx-amount-row" id="pk-amount-row">
+        <span class="tx-row-icon tx-icon-badge" id="pk-type-icon"><img class="tx-icon-img" src="${kindIcon()}" alt="" /></span>
+        <span class="tx-row-text">Amount</span>
+        <span class="tx-row-value" id="pk-amount-value">${existing ? formatNumber(existing.amount) : "0"} ${currency}</span>
+      </div>
+      <div class="tx-calc-panel hidden" id="pk-calc-panel">
+        ${calculatorHtml("pk-amount", existing ? existing.amount : "")}
+      </div>
+
+      <div class="tx-row" id="pk-category-row">
+        <span class="tx-row-icon tx-icon-badge" id="pk-cat-icon">${catIconHtml()}</span>
+        <span class="tx-row-text" id="pk-cat-label">category</span>
+        <span class="tx-row-chevron">›</span>
+      </div>
+      <div class="tx-panel hidden" id="pk-cat-panel">
+        <div class="tx-panel-head"><button type="button" class="tx-back" id="pk-cat-back">‹</button><span>Select category</span></div>
+        <div class="chip-grid" id="pk-cats">${catChips()}</div>
+      </div>
+
+      <div class="tx-row tx-note-row"><input type="text" id="pk-name" class="tx-note-input" placeholder="name" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
+      <div class="tx-row tx-note-row"><input type="number" id="pk-installments" class="tx-note-input" placeholder="installments" min="1" value="${existing && existing.installments ? existing.installments : ""}" /></div>
+      <div class="tx-row tx-note-row"><input type="text" id="pk-note" class="tx-note-input" placeholder="note" value="${existing ? escapeHtml(existing.note || "") : ""}" /></div>
+
+      <div class="sheet-actions">
+        ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
+        <button class="primary" id="save">Save</button>
+      </div>
+    `, wire);
+
+    function wire(sheetBody) {
+      document.getElementById("tx-close").addEventListener("click", () => App.closeSheet());
+
+      const amountRow = sheetBody.querySelector("#pk-amount-row");
+      const calcPanel = sheetBody.querySelector("#pk-calc-panel");
+      const amountInput = sheetBody.querySelector("#pk-amount");
+      const amountValueEl = sheetBody.querySelector("#pk-amount-value");
+      function syncAmount() {
+        amountValueEl.textContent = `${amountInput.value || "0"} ${currency}`;
+      }
+      amountRow.addEventListener("click", () => {
+        calcPanel.classList.toggle("hidden");
+        sheetBody.querySelector("#pk-cat-panel").classList.add("hidden");
+      });
+      wireCalculator(sheetBody, amountInput);
+      amountInput.addEventListener("input", syncAmount);
+      syncAmount();
+
+      const dueLabel = sheetBody.querySelector("#pk-due-label");
+      wireCalendarPanel(sheetBody, "pk-due", sheetBody.querySelector("#pk-due-row"), () => dueDateIso.v, (iso) => {
+        dueDateIso.v = iso;
+        dueDay.v = Number(iso.slice(8, 10));
+        dueLabel.textContent = formatDateLong(iso);
+        sheetBody.querySelector("#pk-due-panel").classList.add("hidden");
+      });
+
+      const catRow = sheetBody.querySelector("#pk-category-row");
+      const catPanel = sheetBody.querySelector("#pk-cat-panel");
+      function updateCatRow() {
+        const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+        sheetBody.querySelector("#pk-cat-icon").innerHTML = catIconHtml();
+        sheetBody.querySelector("#pk-cat-label").textContent = cat ? cat.name : "category";
+      }
+      catRow.addEventListener("click", () => {
+        catPanel.classList.remove("hidden");
+        calcPanel.classList.add("hidden");
+      });
+      sheetBody.querySelector("#pk-cat-back").addEventListener("click", () => catPanel.classList.add("hidden"));
+
       function refreshCats() {
-        body.querySelector("#f-cats").innerHTML = catChips();
-        body.querySelectorAll(".cat-choice").forEach((b) => b.addEventListener("click", () => {
+        sheetBody.querySelector("#pk-cats").innerHTML = catChips();
+        sheetBody.querySelectorAll(".cat-choice").forEach((b) => b.addEventListener("click", () => {
           categoryId.v = b.dataset.v;
-          body.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
+          sheetBody.querySelectorAll(".cat-choice").forEach((x) => x.classList.remove("active"));
           b.classList.add("active");
+          updateCatRow();
+          catPanel.classList.add("hidden");
         }));
       }
-      body.querySelectorAll(".kind-choice").forEach((b) => b.addEventListener("click", () => {
+      sheetBody.querySelectorAll(".kind-choice").forEach((b) => b.addEventListener("click", () => {
         kind.v = b.dataset.v;
         categoryId.v = null;
-        body.querySelectorAll(".kind-choice").forEach((x) => x.classList.remove("active", "expense", "saving"));
-        b.classList.add("active", kind.v === "saving" ? "saving" : "expense");
+        sheetBody.querySelectorAll(".kind-choice").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        sheetBody.querySelector(".type-hint").textContent = kind.v === "saving"
+          ? "Reminds you to set money aside — it won't count as spending."
+          : "Logs a real expense to your ledger once marked paid.";
+        sheetBody.querySelector("#pk-type-icon img").src = kindIcon();
         refreshCats();
+        updateCatRow();
       }));
       refreshCats();
-      body.querySelector("#save").addEventListener("click", () => {
-        const name = body.querySelector("#f-name").value.trim();
-        const amount = Number(body.querySelector("#f-amount").value);
-        if (!name || !amount) return App.toast("Enter name and amount");
-        const dueRaw = body.querySelector("#f-due").value;
-        const installRaw = body.querySelector("#f-installments").value;
-        const note = body.querySelector("#f-note").value.trim();
+      updateCatRow();
+
+      sheetBody.querySelector("#save").addEventListener("click", () => {
+        const name = sheetBody.querySelector("#pk-name").value.trim();
+        const amount = readAmountValue(amountInput);
+        if (!name || !amount || isNaN(amount)) return App.toast("Enter name and amount");
+        const installRaw = sheetBody.querySelector("#pk-installments").value;
         const payload = {
           name,
           amount,
           kind: kind.v,
           categoryId: categoryId.v,
-          dueDay: dueRaw ? Number(dueRaw) : null,
+          dueDay: dueDay.v,
           installments: installRaw ? Number(installRaw) : null,
-          note,
+          note: sheetBody.querySelector("#pk-note").value.trim(),
         };
         if (existing) {
           DB.updatePocketItem(existing.id, payload);
         } else {
-          DB.addPocketItem(Object.assign({ pocketId }, payload));
+          let targetPocketId = pocketId;
+          if (!targetPocketId) {
+            const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
+            const color = POCKET_COLORS[DB.listPockets().length % POCKET_COLORS.length];
+            targetPocketId = DB.addPocket({ name, icon: cat ? cat.icon : (kind.v === "saving" ? "🐷" : "💼"), color }).id;
+          }
+          DB.addPocketItem(Object.assign({ pocketId: targetPocketId }, payload));
         }
         App.closeSheet();
         App.render();
       });
-    });
+      wireDeleteButton(sheetBody.querySelector("#delete"), () => {
+        DB.deletePocketItem(existing.id);
+        App.closeSheet();
+        App.render();
+      }, "Tap again to delete");
+    }
   }
 
   // ---------- TRANSACTION FORM (with optional receipt/OCR pre-fill) ----------
