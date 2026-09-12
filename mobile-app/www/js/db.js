@@ -146,6 +146,7 @@
         installments: item.installments ? Number(item.installments) : null,
         kind: item.kind === "saving" ? "saving" : "bill",
         note: item.note || "",
+        autoDebit: !!item.autoDebit,
         paidRecords: {},
       };
       data.pocketItems.push(i);
