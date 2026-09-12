@@ -140,7 +140,10 @@
   // accordion. Lives at module scope (not per-render) so it survives the
   // full re-render that toggling paid state or expand/collapse triggers.
   const expandedPockets = new Set();
-  const expandedPocketItems = new Set();
+  // Bill/reminder detail lines (due date, installments, auto debit) auto-
+  // expand by default — this tracks the items a user has explicitly
+  // collapsed back, rather than the ones expanded.
+  const collapsedPocketItems = new Set();
 
   function pocketItemDetailLine(item, state) {
     const parts = [];
@@ -155,7 +158,7 @@
   function pocketAccordionItemRow(item, pocket, state) {
     const isPaid = pocketItemStatus(item, state.month) === "paid";
     const cat = item.categoryId ? categoryById(item.categoryId) : null;
-    const isExpanded = expandedPocketItems.has(item.id);
+    const isExpanded = !collapsedPocketItems.has(item.id);
     const currency = DB.getSettings().currency;
     const icon = cat ? cat.icon : item.kind === "saving" ? "🐷" : pocket.icon;
     const row = el(`
@@ -175,8 +178,8 @@
     });
     row.querySelector(".item-toggle").addEventListener("click", (e) => {
       e.stopPropagation();
-      if (isExpanded) expandedPocketItems.delete(item.id);
-      else expandedPocketItems.add(item.id);
+      if (isExpanded) collapsedPocketItems.add(item.id);
+      else collapsedPocketItems.delete(item.id);
       App.render();
     });
     row.addEventListener("click", () => openPocketItemActions(item, pocket, state.month));
@@ -225,7 +228,7 @@
           .sort((a, b) => (a.dueDay || 99) - (b.dueDay || 99))
           .forEach((item) => {
             group.appendChild(pocketAccordionItemRow(item, pocket, state));
-            if (expandedPocketItems.has(item.id)) {
+            if (!collapsedPocketItems.has(item.id)) {
               const line = pocketItemDetailLine(item, state);
               if (line) group.appendChild(el(`<div class="day-sub-row item-detail"><div class="detail-text">${line}</div></div>`));
             }
@@ -327,7 +330,7 @@
     const statsRow = el(`
       <div class="pocket-stats-row">
         <button type="button" class="pocket-stat" id="salary-stat">
-          <div class="pocket-stat-label income">Salary</div>
+          <div class="pocket-stat-label income">Income</div>
           <div class="pocket-stat-value income">${formatNumber(salary)}<span class="cur">${escapeHtml(currency)}</span></div>
         </button>
         <div class="pocket-stat right">
