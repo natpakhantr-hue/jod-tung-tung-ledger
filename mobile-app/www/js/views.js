@@ -535,6 +535,7 @@
     // picker is just a friendlier way to choose it — only the day is kept.
     const dueDay = { v: existing && existing.dueDay ? existing.dueDay : new Date().getDate() };
     const dueDateIso = { v: Utils.dateForDay(Utils.monthKey(), dueDay.v) };
+    const dueEnabled = { v: existing ? !!existing.dueDay : true };
 
     function catChips() {
       return DB.listCategories(kind.v === "saving" ? "saving" : "expense")
@@ -571,9 +572,12 @@
       </div>
       <div class="type-hint">${kind.v === "saving" ? "Reminds you to set money aside — it won't count as spending." : "Logs a real expense to your ledger once marked paid."}</div>
 
-      <div class="tx-row" id="pk-due-row">
-        <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
-        <span class="tx-row-text" id="pk-due-label">${formatDateLong(dueDateIso.v)}</span>
+      <div class="tx-row ${dueEnabled.v ? "" : "pk-row-disabled"}" id="pk-due-row">
+        <span class="pk-tap-area" id="pk-due-tap">
+          <img class="tx-row-icon" src="icons/tx/calendar.png" alt="" />
+          <span class="tx-row-text" id="pk-due-label">${dueEnabled.v ? formatDateLong(dueDateIso.v) : "No due date"}</span>
+        </span>
+        <span class="pk-switch ${dueEnabled.v ? "on" : ""}" id="pk-due-switch"><span class="pk-switch-knob"></span></span>
       </div>
       ${calendarPanelHtml("pk-due", "Select due date")}
 
@@ -646,11 +650,25 @@
       syncAmount();
 
       const dueLabel = sheetBody.querySelector("#pk-due-label");
-      wireCalendarPanel(sheetBody, "pk-due", sheetBody.querySelector("#pk-due-row"), () => dueDateIso.v, (iso) => {
+      const dueTap = sheetBody.querySelector("#pk-due-tap");
+      // Registered before wireCalendarPanel's own click listener on the same
+      // element, so when the due date is off this blocks that later listener
+      // (stopImmediatePropagation) instead of popping the calendar anyway.
+      dueTap.addEventListener("click", (e) => {
+        if (!dueEnabled.v) e.stopImmediatePropagation();
+      });
+      wireCalendarPanel(sheetBody, "pk-due", dueTap, () => dueDateIso.v, (iso) => {
         dueDateIso.v = iso;
         dueDay.v = Number(iso.slice(8, 10));
         dueLabel.textContent = formatDateLong(iso);
         sheetBody.querySelector("#pk-due-panel").classList.add("hidden");
+      });
+      sheetBody.querySelector("#pk-due-switch").addEventListener("click", (e) => {
+        e.stopPropagation();
+        dueEnabled.v = !dueEnabled.v;
+        sheetBody.querySelector("#pk-due-switch").classList.toggle("on", dueEnabled.v);
+        sheetBody.querySelector("#pk-due-row").classList.toggle("pk-row-disabled", !dueEnabled.v);
+        dueLabel.textContent = dueEnabled.v ? formatDateLong(dueDateIso.v) : "No due date";
       });
 
       const catRow = sheetBody.querySelector("#pk-category-row");
@@ -737,7 +755,7 @@
           amount,
           kind: kind.v,
           categoryId: categoryId.v,
-          dueDay: dueDay.v,
+          dueDay: dueEnabled.v ? dueDay.v : null,
           installments: installRaw ? Number(installRaw) : null,
           note: sheetBody.querySelector("#pk-note").value.trim(),
           autoDebit: autoDebit.v,
