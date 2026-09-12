@@ -110,6 +110,13 @@ errors for you.
 
 - **History** (`stats()`, route `#/stats`) — monthly trend charts (`charts.js`).
 
+The native gallery auto-scan (`checkNativeGallery()` in `app.js`) shows a live
+"Reading slip photo N of M…" notice (the same `#update-banner` spinner element the
+update-check reload uses, via `showUpdateBanner()`/`hideUpdateBanner()`) for the
+whole time it's OCR-ing a batch — it used to run fully silent until a summary toast
+at the end, which gave no feedback during what can be a several-seconds-per-photo
+wait. Native-app-only, like the rest of gallery scanning.
+
 - **Settings** (`settings()`) — currency, Bank Slip Albums (native-app-only: gated
   behind `window.Capacitor.Plugins.GalleryScan`, so it never appears in a browser/
   staging preview — that's expected, not a bug), categories, data export/import/reset.

@@ -202,7 +202,12 @@
       let logged = 0;
       let needsReview = 0;
       let unreadable = 0;
+      let i = 0;
       for (const img of unseen) {
+        i++;
+        showUpdateBanner(
+          unseen.length > 1 ? `Reading slip photo ${i} of ${unseen.length}…` : "Reading new slip photo…"
+        );
         const id = photoIdFromUri(img.uri);
         try {
           const { base64 } = await GalleryScan.readImageBase64({ uri: img.uri });
@@ -217,6 +222,7 @@
         }
         DB.markPhotoScanned(id);
       }
+      hideUpdateBanner();
 
       if (logged || needsReview) render();
       if (logged || needsReview || unreadable) {
@@ -269,6 +275,10 @@
     }
   }
 
+  // Shared "spinner + text" banner — used for the update-check reload notice
+  // and, below, as a live notice while the native gallery scan is reading
+  // slip photos (which can take a few seconds each and previously gave no
+  // sign anything was happening until it was all done).
   function showUpdateBanner(text) {
     let b = document.getElementById("update-banner");
     if (!b) {
@@ -277,6 +287,10 @@
     }
     b.querySelector("#update-banner-text").textContent = text;
     requestAnimationFrame(() => b.classList.add("show"));
+  }
+  function hideUpdateBanner() {
+    const b = document.getElementById("update-banner");
+    if (b) b.classList.remove("show");
   }
 
   // Fetches the tiny version.json (always network-fresh, bypassing cache) and
