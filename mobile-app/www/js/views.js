@@ -1606,33 +1606,21 @@
 
     wrap.appendChild(el(`<div class="section-title">Last 12 Months</div>`));
 
-    const expenseData = perMonth.map((m) => ({ label: Utils.monthLabelShort(m.mk), value: m.expense, valueLabel: formatMoney(m.expense), color: "var(--expense)" }));
+    // One grouped chart — Income/Outcome/Net side by side for each month —
+    // instead of three separate single-series charts, so all three are easy
+    // to compare at the same month.
+    const rows = perMonth.map((m) => ({ label: Utils.monthLabelShort(m.mk), values: [m.income, m.expense, Math.abs(m.net)] }));
+    const series = [
+      { label: "Income", color: "var(--income)" },
+      { label: "Outcome", color: "var(--expense)" },
+      { label: "Net", color: "var(--primary)" },
+    ];
     wrap.appendChild(el(`
       <div class="card">
-        <h2>Expense by Month</h2>
-        ${Charts.barChart(expenseData)}
-        <div style="font-size:11px;color:var(--text-muted);margin-top:10px">Average ${formatMoney(avgExpense)}/mo across ${active.length} active month${active.length === 1 ? "" : "s"}.</div>
+        ${Charts.groupedBarChart(rows, series)}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:12px">Averages across ${active.length} active month${active.length === 1 ? "" : "s"}: Income ${formatMoney(avgIncome)} · Outcome ${formatMoney(avgExpense)}.</div>
       </div>
     `));
-
-    const incomeData = perMonth.map((m) => ({ label: Utils.monthLabelShort(m.mk), value: m.income, valueLabel: formatMoney(m.income), color: "var(--income)" }));
-    wrap.appendChild(el(`
-      <div class="card">
-        <h2>Income by Month</h2>
-        ${Charts.barChart(incomeData)}
-        <div style="font-size:11px;color:var(--text-muted);margin-top:10px">Average ${formatMoney(avgIncome)}/mo across ${active.length} active month${active.length === 1 ? "" : "s"}.</div>
-      </div>
-    `));
-
-    const maxAbsNet = Math.max(1, ...perMonth.map((m) => Math.abs(m.net)));
-    const netRows = perMonth
-      .map((m) => {
-        const pct = Math.max(2, (Math.abs(m.net) / maxAbsNet) * 100);
-        const color = m.net >= 0 ? "var(--income)" : "var(--expense)";
-        return `<div class="bar-row"><div class="bar-label">${Utils.monthLabelShort(m.mk)}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div><div class="bar-value">${formatMoney(m.net)}</div></div>`;
-      })
-      .join("");
-    wrap.appendChild(el(`<div class="card"><h2>Net by Month</h2><div class="bar-chart">${netRows}</div></div>`));
 
     setTimeout(() => document.getElementById("chart-back").addEventListener("click", () => App.navigate("#/stats")));
     return wrap;
