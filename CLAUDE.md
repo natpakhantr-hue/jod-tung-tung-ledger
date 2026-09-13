@@ -108,7 +108,28 @@ errors for you.
   open) — **separate** from a pocket bill's auto-debit, even though both eventually
   create transactions.
 
-- **History** (`stats()`, route `#/stats`) — monthly trend charts (`charts.js`).
+- **History** (`stats()`, route `#/stats`) — a statement breakdown by category,
+  **not** the monthly trend charts (those moved to Chart, below). Header row is a
+  custom one-off (`historySwitchRow()`), not the shared `monthSwitcher()`: a chart-
+  icon button (→ Chart), the month label with ‹ › (or, once toggled, just "Total"
+  with no arrows), and a Month/Total switch (`historyTotalMode`, module-scope state
+  like the Pockets accordion's). Below that, an Income/Outcome tab (`historyTab`,
+  internally `"income"`/`"expense"` — matches `tx.type`, not the display label) picks
+  which statement type's categories are broken down; each category is its own
+  collapsible group (`historyCategoryGroupEl()`) showing icon, name, % of that tab's
+  total, amount, and — Month mode only — an expand arrow revealing every individual
+  transaction filed under it (`expandedHistoryCats`, same pattern). Total mode drops
+  the expand arrows entirely: aggregating many months of one category down to a
+  transaction list isn't useful, so it's disabled rather than just hidden.
+
+- **Chart** (`chartPage()`, route `#/chart`, reached only via History's own chart-icon
+  button — not in the bottom nav) — the monthly trend bar charts (`charts.js`) that
+  used to live at History directly: Expense/Income/Net by Month, over a trailing
+  12-month window ending at whichever month History has selected (so the shared
+  `monthSwitcher()` here still does something, even though the chart itself isn't
+  scoped to one month). Back button returns to `#/stats`; the bottom nav's History
+  tab stays highlighted while here (`app.js`'s nav-active check treats `chart` as an
+  alias of `stats`, the same way a pocket detail page keeps `pockets` highlighted).
 
 The native gallery auto-scan (`checkNativeGallery()` in `app.js`) shows a live
 "Reading slip photo N of M…" notice (the same `#update-banner` spinner element the
@@ -164,17 +185,19 @@ handler always sets `needsReview: false`).
   badge background), and `icons/category/*` (category icons, see below) are exported
   design assets — check `design/icons/` (untracked, gitignored-in-spirit scratch
   folder) for anything newer before reusing an old one.
-- **Category icons**: a category's `icon` is a path into the fixed `icons/category/`
-  image set (`CATEGORY_ICONS` in `views.js`), picked from a grid in `openCategoryForm`
-  — not free-typed emoji anymore. `categoryIconMarkup(icon, cls)` (`views.js`) is the
-  one place that decides how to render a category's `icon`: emits an `<img>` for a
-  path, or falls back to rendering old data's plain emoji as text — every call site
-  that shows a category's icon (Home rows, Pockets accordion, pocket detail, category
-  chips in Add Transaction/Add Pocket, the Settings category list) goes through it, so
-  a pre-existing install's old emoji categories keep displaying correctly without a
-  migration. Pocket icons (`POCKET_ICONS`) are a separate, still-emoji picker — don't
-  conflate the two; a pocket auto-created from a bill's own "+" never inherits the
-  bill's category icon, it always gets a plain emoji default.
+- **Category and Pocket icons**: both a category's and a pocket's `icon` are a path
+  into the same fixed `icons/category/` image set (`CATEGORY_ICONS` in `views.js`;
+  `POCKET_ICONS` is just `= CATEGORY_ICONS`, one shared list), picked from a grid in
+  `openCategoryForm` / `openPocketForm` — not free-typed emoji anymore.
+  `iconMarkup(icon, cls)` (`views.js`) is the one place that decides how to render
+  either kind of icon: emits an `<img>` for a path, or falls back to rendering old
+  data's plain emoji as text — every call site that shows a category's or pocket's
+  icon (Home rows, Pockets accordion, pocket detail, category/pocket chips in Add
+  Transaction/Add Pocket, the Settings category list) goes through it, so a
+  pre-existing install's old emoji categories/pockets keep displaying correctly
+  without a migration. A pocket auto-created from a bill's own "+" (no explicit
+  pocket picked) gets a fixed default icon (piggy-bank for a saving reminder,
+  briefcase otherwise) — it never inherits the bill's own category icon.
 - **Single light theme only** — no `@media (prefers-color-scheme: dark)` block. This
   is deliberate: the app matches one specific Figma design regardless of the phone's
   system theme. Don't reintroduce a dark-mode override.

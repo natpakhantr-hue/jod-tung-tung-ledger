@@ -69,5 +69,64 @@
       .join("")}</div>`;
   }
 
-  window.Charts = { pieChart, barChart, PALETTE };
+  // Rounds up to a "nice" axis max (1/2/5/10 × a power of ten) so tick
+  // labels read as round numbers instead of whatever the raw max happens
+  // to be.
+  function niceCeil(n) {
+    if (n <= 0) return 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(n)));
+    const norm = n / mag;
+    const niceNorm = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return niceNorm * mag;
+  }
+
+  // Compares several series against a shared axis, one grouped set of bars
+  // per row — e.g. Income/Outcome/Net side by side for each month, instead
+  // of three separate single-series charts.
+  // rows: [{label, values: [n, n, ...]}]; series: [{label, color}, ...]
+  // (values[i] is drawn with series[i]'s color; both arrays line up by index).
+  function groupedBarChart(rows, series) {
+    if (!rows.length) return `<div class="chart-empty">No data yet</div>`;
+    const fmt = window.Utils && window.Utils.formatNumber ? window.Utils.formatNumber : (n) => Math.round(n);
+    const max = niceCeil(Math.max(1, ...rows.flatMap((r) => r.values.map((v) => Math.abs(v)))));
+
+    const legend = series
+      .map((s) => `<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.label}</div>`)
+      .join("");
+    // Label and its bar-group are one flex row (not two parallel columns) so
+    // they can never drift out of alignment with each other.
+    const dataRows = rows
+      .map(
+        (r) => `
+        <div class="grouped-chart-row">
+          <div class="grouped-chart-label">${r.label}</div>
+          <div class="grouped-chart-group">
+            ${r.values
+              .map((v, i) => {
+                const pct = Math.max(2, (Math.abs(v) / max) * 100);
+                const color = (series[i] && series[i].color) || PALETTE[i % PALETTE.length];
+                return `<div class="grouped-chart-track"><div class="grouped-chart-fill" style="width:${pct}%;background:${color}"></div></div>`;
+              })
+              .join("")}
+          </div>
+        </div>`
+      )
+      .join("");
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span>${fmt(Math.round(max * f))}</span>`).join("");
+
+    return `
+      <div class="grouped-chart">
+        <div class="grouped-chart-legend">${legend}</div>
+        <div class="grouped-chart-plot">
+          <div class="grouped-chart-grid"></div>
+          <div class="grouped-chart-rows">${dataRows}</div>
+        </div>
+        <div class="grouped-chart-axis-row">
+          <div class="grouped-chart-axis-spacer"></div>
+          <div class="grouped-chart-axis-ticks">${ticks}</div>
+        </div>
+      </div>`;
+  }
+
+  window.Charts = { pieChart, barChart, groupedBarChart, PALETTE };
 })();

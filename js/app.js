@@ -10,6 +10,7 @@
     pockets: () => window.Views.pocketsList(state),
     pocket: (id) => window.Views.pocketDetail(state, id),
     stats: () => window.Views.stats(state),
+    chart: () => window.Views.chartPage(state),
     settings: () => window.Views.settings(state),
   };
 
@@ -40,7 +41,7 @@
     if (content) main.appendChild(content);
 
     document.querySelectorAll("nav.bottom-nav a[data-route]").forEach((a) => {
-      a.classList.toggle("active", a.dataset.route === name || (name === "pocket" && a.dataset.route === "pockets"));
+      a.classList.toggle("active", a.dataset.route === name || (name === "pocket" && a.dataset.route === "pockets") || (name === "chart" && a.dataset.route === "stats"));
     });
 
     window.scrollTo(0, 0);

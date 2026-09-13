@@ -58,11 +58,11 @@
     return DB.listCategories().find((c) => c.id === id);
   }
 
-  // Category icons are picked from a fixed image set (icons/category/*.png),
-  // not free-typed emoji — render an <img> for those. Old data saved before
-  // this change (or a restored backup) may still carry a plain emoji icon;
-  // fall back to rendering it as text so nothing breaks.
-  function categoryIconMarkup(icon, cls) {
+  // Category AND pocket icons are both picked from a fixed image set
+  // (icons/category/*.png), not free-typed emoji — render an <img> for those.
+  // Old data saved before this change (or a restored backup) may still carry
+  // a plain emoji icon; fall back to rendering it as text so nothing breaks.
+  function iconMarkup(icon, cls) {
     if (icon && /\.(png|jpe?g|svg)$/i.test(icon)) {
       return `<img${cls ? ` class="${cls}"` : ""} src="${icon}" alt="">`;
     }
@@ -121,7 +121,7 @@
             if (t.note && (!t.autoLogged || t.needsReview)) subParts.push(escapeHtml(t.note));
             const row = el(`
               <div class="day-sub-row">
-                <div class="emoji">${c ? categoryIconMarkup(c.icon) : fallbackIcon}</div>
+                <div class="emoji">${c ? iconMarkup(c.icon) : fallbackIcon}</div>
                 <div class="main">
                   <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.needsReview ? " ⚠️" : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
@@ -173,7 +173,7 @@
     const cat = item.categoryId ? categoryById(item.categoryId) : null;
     const isExpanded = !collapsedPocketItems.has(item.id);
     const currency = DB.getSettings().currency;
-    const icon = cat ? categoryIconMarkup(cat.icon) : item.kind === "saving" ? "🐷" : pocket.icon;
+    const icon = cat ? iconMarkup(cat.icon) : item.kind === "saving" ? "🐷" : iconMarkup(pocket.icon);
     const row = el(`
       <div class="day-sub-row item-row">
         <div class="emoji">${icon}</div>
@@ -388,10 +388,10 @@
   }
 
   const POCKET_COLORS = ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
-  const POCKET_ICONS = ["💼", "🏠", "📈", "🛍️", "🚗", "🏥", "🎓", "✈️", "💡", "🐷"];
 
   // Category icons are chosen from this fixed set (icons/category/*.png),
-  // not typed in as free-form emoji.
+  // not typed in as free-form emoji. Pocket icons are picked from the exact
+  // same set (see POCKET_ICONS below) — one shared image set for both.
   const CATEGORY_ICONS = [
     "icons/category/banknote.png",
     "icons/category/briefcase.png",
@@ -413,13 +413,14 @@
     "icons/category/circle-ellipsis.png",
     "icons/category/circle-ellipsis-1.png",
   ];
+  const POCKET_ICONS = CATEGORY_ICONS;
 
   function openPocketForm(existing) {
     const chosenColor = { v: existing ? existing.color : POCKET_COLORS[0] };
     const chosenIcon = { v: existing ? existing.icon : POCKET_ICONS[0] };
     App.openSheet(existing ? "Edit Pocket" : "New Pocket", `
       <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Fixed Cost" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
-      <div class="field"><label>Icon</label><div class="chip-grid" id="f-icons">${POCKET_ICONS.map((ic) => `<div class="chip icon-choice ${ic === chosenIcon.v ? "active" : ""}" data-v="${ic}">${ic}</div>`).join("")}</div></div>
+      <div class="field"><label>Icon</label><div class="chip-grid icon-grid" id="f-icons">${POCKET_ICONS.map((ic) => `<div class="chip icon-choice ${ic === chosenIcon.v ? "active" : ""}" data-v="${ic}"><img src="${ic}" alt=""></div>`).join("")}</div></div>
       <div class="field"><label>Color</label><div class="color-grid" id="f-colors">${POCKET_COLORS.map((c) => `<div class="color-swatch ${c === chosenColor.v ? "active" : ""}" data-v="${c}" style="background:${c}"></div>`).join("")}</div></div>
       <div class="sheet-actions">
         ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
@@ -500,7 +501,7 @@
           const kindBadge = isSaving ? `<span class="pill installment">🐷 Reminder</span>` : "";
           const row = el(`
             <div class="row-item">
-              <div class="emoji">${cat ? categoryIconMarkup(cat.icon) : isSaving ? "🐷" : "🧾"}</div>
+              <div class="emoji">${cat ? iconMarkup(cat.icon) : isSaving ? "🐷" : "🧾"}</div>
               <div class="main">
                 <div class="title">${escapeHtml(item.name)}</div>
                 <div class="sub">${item.dueDay ? "Due day " + item.dueDay : "No due date"} · <span class="pill ${pillClass}">${pillText}</span> ${installBadge} ${kindBadge}${item.note ? "<br>" + escapeHtml(item.note) : ""}</div>
@@ -579,19 +580,19 @@
 
     function catChips() {
       return DB.listCategories(kind.v === "saving" ? "saving" : "expense")
-        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${categoryIconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`)
+        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${iconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`)
         .join("");
     }
     function catIconHtml() {
       const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
-      return cat ? categoryIconMarkup(cat.icon, "tx-icon-img") : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+      return cat ? iconMarkup(cat.icon, "tx-icon-img") : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
     }
     function kindIcon() {
       return kind.v === "saving" ? "icons/tx/saving.png" : "icons/tx/outcome.png";
     }
     function pocketChips() {
       return DB.listPockets()
-        .map((p) => `<div class="chip pocket-choice ${p.id === chosenPocketId.v ? "active" : ""}" data-v="${p.id}">${p.icon} ${escapeHtml(p.name)}</div>`)
+        .map((p) => `<div class="chip pocket-choice ${p.id === chosenPocketId.v ? "active" : ""}" data-v="${p.id}">${iconMarkup(p.icon, "cat-chip-icon")} ${escapeHtml(p.name)}</div>`)
         .join("");
     }
     function pocketRowText() {
@@ -806,7 +807,7 @@
         let targetPocketId = chosenPocketId.v;
         if (!targetPocketId) {
           const color = POCKET_COLORS[DB.listPockets().length % POCKET_COLORS.length];
-          targetPocketId = DB.addPocket({ name: newPocketName.v || name, icon: kind.v === "saving" ? "🐷" : "💼", color }).id;
+          targetPocketId = DB.addPocket({ name: newPocketName.v || name, icon: kind.v === "saving" ? "icons/category/piggy-bank.png" : "icons/category/briefcase.png", color }).id;
         }
         payload.pocketId = targetPocketId;
         if (existing) {
@@ -1036,7 +1037,7 @@
 
     function categoryChips() {
       return DB.listCategories(type.v)
-        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${categoryIconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`)
+        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${iconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`)
         .join("");
     }
 
@@ -1044,7 +1045,7 @@
     // back to the generic category glyph.
     function catIconHtml() {
       const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
-      return cat ? categoryIconMarkup(cat.icon, "tx-icon-img") : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+      return cat ? iconMarkup(cat.icon, "tx-icon-img") : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
     }
 
     const receiptImage = ocr.receiptImage || (existing ? existing.receiptImage : null);
@@ -1411,13 +1412,179 @@
     }
   }
 
-  // ---------- STATS (long-term month-over-month trends) ----------
+  // ---------- HISTORY ----------
+  // Whether the page is showing one month's breakdown (default) or an
+  // all-time cumulative total, which statement type's categories are shown,
+  // and which categories are expanded to their individual transactions —
+  // all live at module scope so they survive the full re-render every toggle
+  // triggers, same pattern as the Pockets accordion state above.
+  let historyTotalMode = false;
+  let historyTab = "expense"; // "income" | "expense" — tx.type, not the "Outcome" display label
+  const expandedHistoryCats = new Set();
+
+  function historySwitchRow(state) {
+    const row = el(`
+      <div class="month-switch history-switch">
+        <button type="button" class="icon-btn history-chart-btn" id="to-chart"><img src="icons/nav/nav-history.png" alt="Chart"></button>
+        <div class="month-nav">
+          ${historyTotalMode
+            ? `<span class="label">Total</span>`
+            : `
+              <button class="icon-btn" data-dir="-1">‹</button>
+              <span class="label">${monthLabel(state.month)}</span>
+              <button class="icon-btn" data-dir="1">›</button>
+            `}
+        </div>
+        <span class="pk-switch ${historyTotalMode ? "on" : ""}" id="total-toggle"><span class="pk-switch-knob"></span></span>
+      </div>
+    `);
+    row.querySelector("#to-chart").addEventListener("click", () => App.navigate("#/chart"));
+    row.querySelectorAll(".month-nav button[data-dir]").forEach((b) =>
+      b.addEventListener("click", () => App.setMonth(shiftMonth(state.month, Number(b.dataset.dir))))
+    );
+    row.querySelector("#total-toggle").addEventListener("click", () => {
+      historyTotalMode = !historyTotalMode;
+      App.render();
+    });
+    return row;
+  }
+
+  // Groups this tab's transactions (already scoped to the selected month or
+  // all-time total by the caller) by category, sorted by amount descending —
+  // "Uncategorized" is its own bucket rather than being dropped.
+  function historyCategoryGroups(txs) {
+    const total = txs.reduce((s, t) => s + t.amount, 0);
+    const byCat = new Map();
+    txs.forEach((t) => {
+      const key = t.categoryId || "__uncat";
+      if (!byCat.has(key)) byCat.set(key, []);
+      byCat.get(key).push(t);
+    });
+    return Array.from(byCat.entries())
+      .map(([key, list]) => {
+        const amount = list.reduce((s, t) => s + t.amount, 0);
+        return { key, cat: key === "__uncat" ? null : categoryById(key), list, amount, pct: total > 0 ? (amount / total) * 100 : 0 };
+      })
+      .sort((a, b) => b.amount - a.amount);
+  }
+
+  // A category as a collapsible group: summary row (icon, name, % of this
+  // tab's total, amount, expand arrow) plus — once expanded — every
+  // transaction ("slip") filed under it. Expand is disabled in Total mode:
+  // aggregating many months of a category into one list isn't useful detail.
+  function historyCategoryGroupEl(group, state) {
+    const isExpanded = !historyTotalMode && expandedHistoryCats.has(group.key);
+    const currency = DB.getSettings().currency;
+    const icon = group.cat ? iconMarkup(group.cat.icon) : historyTab === "income" ? "💰" : "💸";
+    const g = el(`<div class="day-group"></div>`);
+    const row = el(`
+      <div class="day-sub-row item-row">
+        <div class="emoji">${icon}</div>
+        <div class="main">
+          <div class="title">${group.cat ? escapeHtml(group.cat.name) : "Uncategorized"}</div>
+          <div class="sub">${group.pct.toFixed(0)}%</div>
+        </div>
+        <div class="item-actions">
+          <span class="amt">${formatNumber(group.amount)} ${escapeHtml(currency)}</span>
+          ${historyTotalMode ? "" : `<button type="button" class="item-toggle">${isExpanded ? "▴" : "▾"}</button>`}
+        </div>
+      </div>
+    `);
+    if (historyTotalMode) {
+      row.style.cursor = "default";
+    } else {
+      row.addEventListener("click", () => {
+        if (isExpanded) expandedHistoryCats.delete(group.key);
+        else expandedHistoryCats.add(group.key);
+        App.render();
+      });
+    }
+    g.appendChild(row);
+    if (isExpanded) {
+      group.list
+        .slice()
+        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        .forEach((t) => {
+          const parts = [];
+          if (t.payee) parts.push(escapeHtml(t.payee));
+          if (t.note) parts.push(escapeHtml(t.note));
+          const detail = el(`
+            <div class="day-sub-row item-detail history-tx-row">
+              <div class="main"><div class="sub">${formatDateShort(t.date)}${parts.length ? " · " + parts.join(" · ") : ""}</div></div>
+              <div class="amt">${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
+            </div>
+          `);
+          detail.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openTransactionForm(state, t);
+          });
+          g.appendChild(detail);
+        });
+    }
+    return g;
+  }
+
+  // Statement breakdown by category: an Income/Outcome tab plus a Month/
+  // Total toggle over the same month-switcher every other page uses. Month
+  // mode scopes everything to state.month (like Home/Pockets); Total mode
+  // sums every transaction ever logged instead.
   function stats(state) {
-    setHeader("Stats");
+    setHeader("");
     const wrap = el(`<div></div>`);
+    wrap.appendChild(historySwitchRow(state));
+
+    const currency = DB.getSettings().currency;
+    const allTx = DB.listTransactions();
+    const scoped = historyTotalMode ? allTx : allTx.filter((t) => txInMonth(t, state.month));
+    const incomeTotal = scoped.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+    const outcomeTotal = scoped.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const net = incomeTotal - outcomeTotal;
+
+    wrap.appendChild(el(`
+      <div class="history-stats-row">
+        <div class="history-stat"><div class="history-stat-label income">Income</div><div class="history-stat-value income">${formatNumber(incomeTotal)}<span class="cur">${escapeHtml(currency)}</span></div></div>
+        <div class="history-stat"><div class="history-stat-label expense">Outcome</div><div class="history-stat-value expense">${formatNumber(outcomeTotal)}<span class="cur">${escapeHtml(currency)}</span></div></div>
+        <div class="history-stat"><div class="history-stat-label">Net</div><div class="history-stat-value">${formatNumber(net)}<span class="cur">${escapeHtml(currency)}</span></div></div>
+      </div>
+    `));
+
+    const tabs = el(`
+      <div class="seg history-tabs">
+        <button type="button" class="${historyTab === "income" ? "active income" : ""}" data-v="income">Income</button>
+        <button type="button" class="${historyTab === "expense" ? "active expense" : ""}" data-v="expense">Outcome</button>
+      </div>
+    `);
+    tabs.querySelectorAll("button").forEach((b) =>
+      b.addEventListener("click", () => {
+        historyTab = b.dataset.v;
+        App.render();
+      })
+    );
+    wrap.appendChild(tabs);
+
+    const tabTxs = scoped.filter((t) => t.type === historyTab);
+    if (!tabTxs.length) {
+      wrap.appendChild(el(`<div class="empty-state"><div class="big">📊</div><div>No ${historyTab === "income" ? "income" : "outcome"} ${historyTotalMode ? "logged yet" : "this month"}.</div></div>`));
+    } else {
+      const groups = el(`<div class="day-groups"></div>`);
+      historyCategoryGroups(tabTxs).forEach((g) => groups.appendChild(historyCategoryGroupEl(g, state)));
+      wrap.appendChild(groups);
+    }
+
+    return wrap;
+  }
+
+  // ---------- CHART (long-term month-over-month trends) ----------
+  // Reached from History's own chart button — a 12-month window ending at
+  // whichever month History has selected (defaults to the current one), so
+  // the shared month switcher still does something meaningful here.
+  function chartPage(state) {
+    setHeader("", `<button class="icon-btn" id="chart-back">←</button>`);
+    const wrap = el(`<div></div>`);
+    wrap.appendChild(monthSwitcher(state));
 
     const months = [];
-    for (let i = 11; i >= 0; i--) months.push(Utils.shiftMonth(Utils.monthKey(), -i));
+    for (let i = 11; i >= 0; i--) months.push(Utils.shiftMonth(state.month, -i));
 
     const allTx = DB.listTransactions();
     const perMonth = months.map((mk) => {
@@ -1431,6 +1598,7 @@
     const active = perMonth.filter((m) => m.income || m.expense || m.saving);
     if (!active.length) {
       wrap.appendChild(el(`<div class="empty-state"><div class="big">📊</div><div>No history yet.</div><div style="font-size:13px;margin-top:4px">Add some transactions and come back to see monthly trends.</div></div>`));
+      setTimeout(() => document.getElementById("chart-back").addEventListener("click", () => App.navigate("#/stats")));
       return wrap;
     }
     const avgExpense = active.reduce((s, m) => s + m.expense, 0) / active.length;
@@ -1438,34 +1606,23 @@
 
     wrap.appendChild(el(`<div class="section-title">Last 12 Months</div>`));
 
-    const expenseData = perMonth.map((m) => ({ label: Utils.monthLabelShort(m.mk), value: m.expense, valueLabel: formatMoney(m.expense), color: "var(--expense)" }));
+    // One grouped chart — Income/Outcome/Net side by side for each month —
+    // instead of three separate single-series charts, so all three are easy
+    // to compare at the same month.
+    const rows = perMonth.map((m) => ({ label: Utils.monthLabelShort(m.mk), values: [m.income, m.expense, Math.abs(m.net)] }));
+    const series = [
+      { label: "Income", color: "var(--income)" },
+      { label: "Outcome", color: "var(--expense)" },
+      { label: "Net", color: "var(--primary)" },
+    ];
     wrap.appendChild(el(`
       <div class="card">
-        <h2>Expense by Month</h2>
-        ${Charts.barChart(expenseData)}
-        <div style="font-size:11px;color:var(--text-muted);margin-top:10px">Average ${formatMoney(avgExpense)}/mo across ${active.length} active month${active.length === 1 ? "" : "s"}.</div>
+        ${Charts.groupedBarChart(rows, series)}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:12px">Averages across ${active.length} active month${active.length === 1 ? "" : "s"}: Income ${formatMoney(avgIncome)} · Outcome ${formatMoney(avgExpense)}.</div>
       </div>
     `));
 
-    const incomeData = perMonth.map((m) => ({ label: Utils.monthLabelShort(m.mk), value: m.income, valueLabel: formatMoney(m.income), color: "var(--income)" }));
-    wrap.appendChild(el(`
-      <div class="card">
-        <h2>Income by Month</h2>
-        ${Charts.barChart(incomeData)}
-        <div style="font-size:11px;color:var(--text-muted);margin-top:10px">Average ${formatMoney(avgIncome)}/mo across ${active.length} active month${active.length === 1 ? "" : "s"}.</div>
-      </div>
-    `));
-
-    const maxAbsNet = Math.max(1, ...perMonth.map((m) => Math.abs(m.net)));
-    const netRows = perMonth
-      .map((m) => {
-        const pct = Math.max(2, (Math.abs(m.net) / maxAbsNet) * 100);
-        const color = m.net >= 0 ? "var(--income)" : "var(--expense)";
-        return `<div class="bar-row"><div class="bar-label">${Utils.monthLabelShort(m.mk)}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div><div class="bar-value">${formatMoney(m.net)}</div></div>`;
-      })
-      .join("");
-    wrap.appendChild(el(`<div class="card"><h2>Net by Month</h2><div class="bar-chart">${netRows}</div></div>`));
-
+    setTimeout(() => document.getElementById("chart-back").addEventListener("click", () => App.navigate("#/stats")));
     return wrap;
   }
 
@@ -1561,7 +1718,7 @@
       catCard.appendChild(el(`<div class="section-title" style="margin-top:6px">${t}</div>`));
       const grid = el(`<div class="chip-grid"></div>`);
       DB.listCategories(t).forEach((c) => {
-        const chip = el(`<div class="chip">${categoryIconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`);
+        const chip = el(`<div class="chip">${iconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`);
         chip.style.cursor = "pointer";
         chip.addEventListener("click", () => openCategoryForm(c));
         grid.appendChild(chip);
@@ -1682,6 +1839,7 @@
     pocketsList,
     pocketDetail,
     stats,
+    chartPage,
     settings,
     openTransactionForm,
     handleSharedPhoto,
