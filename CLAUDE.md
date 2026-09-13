@@ -110,6 +110,13 @@ errors for you.
 
 - **History** (`stats()`, route `#/stats`) — monthly trend charts (`charts.js`).
 
+The native gallery auto-scan (`checkNativeGallery()` in `app.js`) shows a live
+"Reading slip photo N of M…" notice (the same `#update-banner` spinner element the
+update-check reload uses, via `showUpdateBanner()`/`hideUpdateBanner()`) for the
+whole time it's OCR-ing a batch — it used to run fully silent until a summary toast
+at the end, which gave no feedback during what can be a several-seconds-per-photo
+wait. Native-app-only, like the rest of gallery scanning.
+
 - **Settings** (`settings()`) — currency, Bank Slip Albums (native-app-only: gated
   behind `window.Capacitor.Plugins.GalleryScan`, so it never appears in a browser/
   staging preview — that's expected, not a bug), categories, data export/import/reset.
@@ -118,7 +125,8 @@ errors for you.
 
 - **Transaction**: `type` (expense/income/saving/transfer), `amount`, `categoryId`,
   `date`, `note`, `payee`, `pocketId`/`pocketItemId` (set when it came from a bill),
-  `recurring` (`{freq, nextDate}` or `null`), `autoLogged` (bool), `receiptImage`.
+  `recurring` (`{freq, nextDate}` or `null`), `autoLogged` (bool), `needsReview`
+  (bool — a slip auto-scan that found no amount; see below), `receiptImage`.
 - **Pocket**: `id`, `name`, `icon`, `color`.
 - **Pocket Item**: `pocketId`, `name`, `amount`, `dueDay` (plain day-of-month,
   nullable — recurs every month, not a fixed calendar date), `categoryId`,
@@ -128,6 +136,14 @@ errors for you.
 `autoLogged: true` on a transaction means: don't show the 🤖-style note/clutter on
 its Home statement row (see `dashboard()`'s row rendering) — it's set for recurring-
 engine transactions, OCR slip-scan auto-logs, and bill/auto-debit payments alike.
+
+The native gallery auto-scan (`autoLogSlip()`) never silently drops a slip it can't
+read: when OCR finds no amount, it still logs a ฿0 transaction with `needsReview:
+true` (and a note explaining why) instead of skipping it, so nothing vanishes
+unnoticed. `needsReview` is the one exception to the `autoLogged` note-suppression
+rule above — its row always shows the note and a ⚠️ icon — and gets cleared the
+moment the user edits and saves it with a real amount (`openTransactionForm`'s save
+handler always sets `needsReview: false`).
 
 ## UI conventions to reuse, not reinvent
 
@@ -143,10 +159,22 @@ engine transactions, OCR slip-scan auto-logs, and bill/auto-debit payments alike
   is the current design language for every "Add/Edit" sheet — match it for new forms
   rather than falling back to the older plain `.field`/`.card` styles still used by
   a few untouched screens (pocket container edit, recurring income — now removed).
-- **Icons**: `icons/nav/*` (bottom nav, CSS-mask-recolored for active/inactive) and
+- **Icons**: `icons/nav/*` (bottom nav, CSS-mask-recolored for active/inactive),
   `icons/tx/*` (transaction/pocket form row icons, shown at native color with no
-  badge background) are exported design assets — check `design/icons/` (untracked,
-  gitignored-in-spirit scratch folder) for anything newer before reusing an old one.
+  badge background), and `icons/category/*` (category icons, see below) are exported
+  design assets — check `design/icons/` (untracked, gitignored-in-spirit scratch
+  folder) for anything newer before reusing an old one.
+- **Category icons**: a category's `icon` is a path into the fixed `icons/category/`
+  image set (`CATEGORY_ICONS` in `views.js`), picked from a grid in `openCategoryForm`
+  — not free-typed emoji anymore. `categoryIconMarkup(icon, cls)` (`views.js`) is the
+  one place that decides how to render a category's `icon`: emits an `<img>` for a
+  path, or falls back to rendering old data's plain emoji as text — every call site
+  that shows a category's icon (Home rows, Pockets accordion, pocket detail, category
+  chips in Add Transaction/Add Pocket, the Settings category list) goes through it, so
+  a pre-existing install's old emoji categories keep displaying correctly without a
+  migration. Pocket icons (`POCKET_ICONS`) are a separate, still-emoji picker — don't
+  conflate the two; a pocket auto-created from a bill's own "+" never inherits the
+  bill's category icon, it always gets a plain emoji default.
 - **Single light theme only** — no `@media (prefers-color-scheme: dark)` block. This
   is deliberate: the app matches one specific Figma design regardless of the phone's
   system theme. Don't reintroduce a dark-mode override.

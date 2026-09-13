@@ -200,27 +200,36 @@
       if (!unseen.length) return;
 
       let logged = 0;
+      let needsReview = 0;
       let unreadable = 0;
+      let i = 0;
       for (const img of unseen) {
+        i++;
+        showUpdateBanner(
+          unseen.length > 1 ? `Reading slip photo ${i} of ${unseen.length}…` : "Reading new slip photo…"
+        );
         const id = photoIdFromUri(img.uri);
         try {
           const { base64 } = await GalleryScan.readImageBase64({ uri: img.uri });
           const blob = await (await fetch("data:image/jpeg;base64," + base64)).blob();
           const dataUrl = await window.Views.blobToResizedDataUrl(blob, 900);
           const result = await window.Views.autoLogSlip(dataUrl);
-          if (result.logged) logged++;
+          if (result.needsReview) needsReview++;
+          else if (result.logged) logged++;
           else unreadable++;
         } catch (e) {
           unreadable++;
         }
         DB.markPhotoScanned(id);
       }
+      hideUpdateBanner();
 
-      if (logged) render();
-      if (logged || unreadable) {
+      if (logged || needsReview) render();
+      if (logged || needsReview || unreadable) {
         const parts = [];
         if (logged) parts.push(`${logged} slip${logged === 1 ? "" : "s"} logged automatically`);
-        if (unreadable) parts.push(`${unreadable} photo${unreadable === 1 ? "" : "s"} skipped (no amount found)`);
+        if (needsReview) parts.push(`${needsReview} logged with no amount — please check`);
+        if (unreadable) parts.push(`${unreadable} photo${unreadable === 1 ? "" : "s"} skipped`);
         toast(parts.join(" · "));
       }
     } catch (e) {
@@ -266,6 +275,10 @@
     }
   }
 
+  // Shared "spinner + text" banner — used for the update-check reload notice
+  // and, below, as a live notice while the native gallery scan is reading
+  // slip photos (which can take a few seconds each and previously gave no
+  // sign anything was happening until it was all done).
   function showUpdateBanner(text) {
     let b = document.getElementById("update-banner");
     if (!b) {
@@ -274,6 +287,10 @@
     }
     b.querySelector("#update-banner-text").textContent = text;
     requestAnimationFrame(() => b.classList.add("show"));
+  }
+  function hideUpdateBanner() {
+    const b = document.getElementById("update-banner");
+    if (b) b.classList.remove("show");
   }
 
   // Fetches the tiny version.json (always network-fresh, bypassing cache) and
