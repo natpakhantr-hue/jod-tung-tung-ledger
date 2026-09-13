@@ -159,10 +159,22 @@ handler always sets `needsReview: false`).
   is the current design language for every "Add/Edit" sheet — match it for new forms
   rather than falling back to the older plain `.field`/`.card` styles still used by
   a few untouched screens (pocket container edit, recurring income — now removed).
-- **Icons**: `icons/nav/*` (bottom nav, CSS-mask-recolored for active/inactive) and
+- **Icons**: `icons/nav/*` (bottom nav, CSS-mask-recolored for active/inactive),
   `icons/tx/*` (transaction/pocket form row icons, shown at native color with no
-  badge background) are exported design assets — check `design/icons/` (untracked,
-  gitignored-in-spirit scratch folder) for anything newer before reusing an old one.
+  badge background), and `icons/category/*` (category icons, see below) are exported
+  design assets — check `design/icons/` (untracked, gitignored-in-spirit scratch
+  folder) for anything newer before reusing an old one.
+- **Category icons**: a category's `icon` is a path into the fixed `icons/category/`
+  image set (`CATEGORY_ICONS` in `views.js`), picked from a grid in `openCategoryForm`
+  — not free-typed emoji anymore. `categoryIconMarkup(icon, cls)` (`views.js`) is the
+  one place that decides how to render a category's `icon`: emits an `<img>` for a
+  path, or falls back to rendering old data's plain emoji as text — every call site
+  that shows a category's icon (Home rows, Pockets accordion, pocket detail, category
+  chips in Add Transaction/Add Pocket, the Settings category list) goes through it, so
+  a pre-existing install's old emoji categories keep displaying correctly without a
+  migration. Pocket icons (`POCKET_ICONS`) are a separate, still-emoji picker — don't
+  conflate the two; a pocket auto-created from a bill's own "+" never inherits the
+  bill's category icon, it always gets a plain emoji default.
 - **Single light theme only** — no `@media (prefers-color-scheme: dark)` block. This
   is deliberate: the app matches one specific Figma design regardless of the phone's
   system theme. Don't reintroduce a dark-mode override.

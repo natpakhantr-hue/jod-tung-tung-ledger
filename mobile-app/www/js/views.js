@@ -58,6 +58,17 @@
     return DB.listCategories().find((c) => c.id === id);
   }
 
+  // Category icons are picked from a fixed image set (icons/category/*.png),
+  // not free-typed emoji — render an <img> for those. Old data saved before
+  // this change (or a restored backup) may still carry a plain emoji icon;
+  // fall back to rendering it as text so nothing breaks.
+  function categoryIconMarkup(icon, cls) {
+    if (icon && /\.(png|jpe?g|svg)$/i.test(icon)) {
+      return `<img${cls ? ` class="${cls}"` : ""} src="${icon}" alt="">`;
+    }
+    return escapeHtml(icon || "");
+  }
+
   // ---------- HOME (statement + budget overview) ----------
   function dashboard(state) {
     setHeader("");
@@ -110,7 +121,7 @@
             if (t.note && (!t.autoLogged || t.needsReview)) subParts.push(escapeHtml(t.note));
             const row = el(`
               <div class="day-sub-row">
-                <div class="emoji">${c ? c.icon : fallbackIcon}</div>
+                <div class="emoji">${c ? categoryIconMarkup(c.icon) : fallbackIcon}</div>
                 <div class="main">
                   <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.needsReview ? " ⚠️" : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
@@ -162,7 +173,7 @@
     const cat = item.categoryId ? categoryById(item.categoryId) : null;
     const isExpanded = !collapsedPocketItems.has(item.id);
     const currency = DB.getSettings().currency;
-    const icon = cat ? cat.icon : item.kind === "saving" ? "🐷" : pocket.icon;
+    const icon = cat ? categoryIconMarkup(cat.icon) : item.kind === "saving" ? "🐷" : pocket.icon;
     const row = el(`
       <div class="day-sub-row item-row">
         <div class="emoji">${icon}</div>
@@ -379,6 +390,30 @@
   const POCKET_COLORS = ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
   const POCKET_ICONS = ["💼", "🏠", "📈", "🛍️", "🚗", "🏥", "🎓", "✈️", "💡", "🐷"];
 
+  // Category icons are chosen from this fixed set (icons/category/*.png),
+  // not typed in as free-form emoji.
+  const CATEGORY_ICONS = [
+    "icons/category/banknote.png",
+    "icons/category/briefcase.png",
+    "icons/category/trending-up.png",
+    "icons/category/laptop-minimal.png",
+    "icons/category/gift.png",
+    "icons/category/fork-knife.png",
+    "icons/category/bus-front.png",
+    "icons/category/car.png",
+    "icons/category/shopping-bag.png",
+    "icons/category/heart-pulse.png",
+    "icons/category/dumbbell.png",
+    "icons/category/gamepad.png",
+    "icons/category/receipt-text.png",
+    "icons/category/zap.png",
+    "icons/category/house.png",
+    "icons/category/hand-heart.png",
+    "icons/category/piggy-bank.png",
+    "icons/category/circle-ellipsis.png",
+    "icons/category/circle-ellipsis-1.png",
+  ];
+
   function openPocketForm(existing) {
     const chosenColor = { v: existing ? existing.color : POCKET_COLORS[0] };
     const chosenIcon = { v: existing ? existing.icon : POCKET_ICONS[0] };
@@ -465,7 +500,7 @@
           const kindBadge = isSaving ? `<span class="pill installment">🐷 Reminder</span>` : "";
           const row = el(`
             <div class="row-item">
-              <div class="emoji">${cat ? cat.icon : isSaving ? "🐷" : "🧾"}</div>
+              <div class="emoji">${cat ? categoryIconMarkup(cat.icon) : isSaving ? "🐷" : "🧾"}</div>
               <div class="main">
                 <div class="title">${escapeHtml(item.name)}</div>
                 <div class="sub">${item.dueDay ? "Due day " + item.dueDay : "No due date"} · <span class="pill ${pillClass}">${pillText}</span> ${installBadge} ${kindBadge}${item.note ? "<br>" + escapeHtml(item.note) : ""}</div>
@@ -544,12 +579,12 @@
 
     function catChips() {
       return DB.listCategories(kind.v === "saving" ? "saving" : "expense")
-        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${c.icon} ${escapeHtml(c.name)}</div>`)
+        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${categoryIconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`)
         .join("");
     }
     function catIconHtml() {
       const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
-      return cat ? escapeHtml(cat.icon) : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+      return cat ? categoryIconMarkup(cat.icon, "tx-icon-img") : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
     }
     function kindIcon() {
       return kind.v === "saving" ? "icons/tx/saving.png" : "icons/tx/outcome.png";
@@ -770,9 +805,8 @@
         // name, or — when editing — whatever's currently chosen.
         let targetPocketId = chosenPocketId.v;
         if (!targetPocketId) {
-          const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
           const color = POCKET_COLORS[DB.listPockets().length % POCKET_COLORS.length];
-          targetPocketId = DB.addPocket({ name: newPocketName.v || name, icon: cat ? cat.icon : (kind.v === "saving" ? "🐷" : "💼"), color }).id;
+          targetPocketId = DB.addPocket({ name: newPocketName.v || name, icon: kind.v === "saving" ? "🐷" : "💼", color }).id;
         }
         payload.pocketId = targetPocketId;
         if (existing) {
@@ -1002,15 +1036,15 @@
 
     function categoryChips() {
       return DB.listCategories(type.v)
-        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${c.icon} ${escapeHtml(c.name)}</div>`)
+        .map((c) => `<div class="chip cat-choice ${c.id === categoryId.v ? "active" : ""}" data-v="${c.id}">${categoryIconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`)
         .join("");
     }
 
-    // Selected categories keep their own emoji icon; with none chosen yet,
-    // fall back to the generic category glyph.
+    // Selected categories keep their own icon; with none chosen yet, fall
+    // back to the generic category glyph.
     function catIconHtml() {
       const cat = categoryId.v && DB.listCategories().find((c) => c.id === categoryId.v);
-      return cat ? escapeHtml(cat.icon) : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
+      return cat ? categoryIconMarkup(cat.icon, "tx-icon-img") : `<img class="tx-icon-img" src="icons/tx/catgetory-icon.png" alt="">`;
     }
 
     const receiptImage = ocr.receiptImage || (existing ? existing.receiptImage : null);
@@ -1527,7 +1561,7 @@
       catCard.appendChild(el(`<div class="section-title" style="margin-top:6px">${t}</div>`));
       const grid = el(`<div class="chip-grid"></div>`);
       DB.listCategories(t).forEach((c) => {
-        const chip = el(`<div class="chip">${c.icon} ${escapeHtml(c.name)}</div>`);
+        const chip = el(`<div class="chip">${categoryIconMarkup(c.icon, "cat-chip-icon")} ${escapeHtml(c.name)}</div>`);
         chip.style.cursor = "pointer";
         chip.addEventListener("click", () => openCategoryForm(c));
         grid.appendChild(chip);
@@ -1596,6 +1630,7 @@
 
   function openCategoryForm(existing) {
     const type = { v: existing ? existing.type : "expense" };
+    const chosenIcon = { v: existing ? existing.icon : CATEGORY_ICONS[0] };
     App.openSheet(existing ? "Edit Category" : "New Category", `
       <div class="field">
         <div class="seg">
@@ -1605,7 +1640,7 @@
           <button type="button" class="type-choice ${type.v === "transfer" ? "active transfer" : ""}" data-v="transfer">Transfer</button>
         </div>
       </div>
-      <div class="field"><label>Icon (emoji)</label><input type="text" id="f-icon" value="${existing ? existing.icon : "🏷️"}" maxlength="4" /></div>
+      <div class="field"><label>Icon</label><div class="chip-grid icon-grid" id="f-icons">${CATEGORY_ICONS.map((ic) => `<div class="chip icon-choice ${ic === chosenIcon.v ? "active" : ""}" data-v="${ic}"><img src="${ic}" alt=""></div>`).join("")}</div></div>
       <div class="field"><label>Name</label><input type="text" id="f-name" value="${existing ? escapeHtml(existing.name) : ""}" /></div>
       <div class="sheet-actions">
         ${existing ? `<button class="secondary danger" id="delete">Delete</button>` : ""}
@@ -1617,9 +1652,14 @@
         body.querySelectorAll(".type-choice").forEach((x) => x.classList.remove("active", "income", "expense", "saving", "transfer"));
         b.classList.add("active", type.v);
       }));
+      body.querySelectorAll(".icon-choice").forEach((b) => b.addEventListener("click", () => {
+        body.querySelectorAll(".icon-choice").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        chosenIcon.v = b.dataset.v;
+      }));
       body.querySelector("#save").addEventListener("click", () => {
         const name = body.querySelector("#f-name").value.trim();
-        const icon = body.querySelector("#f-icon").value.trim() || "🏷️";
+        const icon = chosenIcon.v;
         if (!name) return App.toast("Enter a name");
         if (existing) {
           DB.updateCategory(existing.id, { name, icon, type: type.v });
