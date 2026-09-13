@@ -1412,13 +1412,179 @@
     }
   }
 
-  // ---------- STATS (long-term month-over-month trends) ----------
+  // ---------- HISTORY ----------
+  // Whether the page is showing one month's breakdown (default) or an
+  // all-time cumulative total, which statement type's categories are shown,
+  // and which categories are expanded to their individual transactions —
+  // all live at module scope so they survive the full re-render every toggle
+  // triggers, same pattern as the Pockets accordion state above.
+  let historyTotalMode = false;
+  let historyTab = "expense"; // "income" | "expense" — tx.type, not the "Outcome" display label
+  const expandedHistoryCats = new Set();
+
+  function historySwitchRow(state) {
+    const row = el(`
+      <div class="month-switch history-switch">
+        <button type="button" class="icon-btn history-chart-btn" id="to-chart"><img src="icons/nav/nav-history.png" alt="Chart"></button>
+        <div class="month-nav">
+          ${historyTotalMode
+            ? `<span class="label">Total</span>`
+            : `
+              <button class="icon-btn" data-dir="-1">‹</button>
+              <span class="label">${monthLabel(state.month)}</span>
+              <button class="icon-btn" data-dir="1">›</button>
+            `}
+        </div>
+        <span class="pk-switch ${historyTotalMode ? "on" : ""}" id="total-toggle"><span class="pk-switch-knob"></span></span>
+      </div>
+    `);
+    row.querySelector("#to-chart").addEventListener("click", () => App.navigate("#/chart"));
+    row.querySelectorAll(".month-nav button[data-dir]").forEach((b) =>
+      b.addEventListener("click", () => App.setMonth(shiftMonth(state.month, Number(b.dataset.dir))))
+    );
+    row.querySelector("#total-toggle").addEventListener("click", () => {
+      historyTotalMode = !historyTotalMode;
+      App.render();
+    });
+    return row;
+  }
+
+  // Groups this tab's transactions (already scoped to the selected month or
+  // all-time total by the caller) by category, sorted by amount descending —
+  // "Uncategorized" is its own bucket rather than being dropped.
+  function historyCategoryGroups(txs) {
+    const total = txs.reduce((s, t) => s + t.amount, 0);
+    const byCat = new Map();
+    txs.forEach((t) => {
+      const key = t.categoryId || "__uncat";
+      if (!byCat.has(key)) byCat.set(key, []);
+      byCat.get(key).push(t);
+    });
+    return Array.from(byCat.entries())
+      .map(([key, list]) => {
+        const amount = list.reduce((s, t) => s + t.amount, 0);
+        return { key, cat: key === "__uncat" ? null : categoryById(key), list, amount, pct: total > 0 ? (amount / total) * 100 : 0 };
+      })
+      .sort((a, b) => b.amount - a.amount);
+  }
+
+  // A category as a collapsible group: summary row (icon, name, % of this
+  // tab's total, amount, expand arrow) plus — once expanded — every
+  // transaction ("slip") filed under it. Expand is disabled in Total mode:
+  // aggregating many months of a category into one list isn't useful detail.
+  function historyCategoryGroupEl(group, state) {
+    const isExpanded = !historyTotalMode && expandedHistoryCats.has(group.key);
+    const currency = DB.getSettings().currency;
+    const icon = group.cat ? iconMarkup(group.cat.icon) : historyTab === "income" ? "💰" : "💸";
+    const g = el(`<div class="day-group"></div>`);
+    const row = el(`
+      <div class="day-sub-row item-row">
+        <div class="emoji">${icon}</div>
+        <div class="main">
+          <div class="title">${group.cat ? escapeHtml(group.cat.name) : "Uncategorized"}</div>
+          <div class="sub">${group.pct.toFixed(0)}%</div>
+        </div>
+        <div class="item-actions">
+          <span class="amt">${formatNumber(group.amount)} ${escapeHtml(currency)}</span>
+          ${historyTotalMode ? "" : `<button type="button" class="item-toggle">${isExpanded ? "▴" : "▾"}</button>`}
+        </div>
+      </div>
+    `);
+    if (historyTotalMode) {
+      row.style.cursor = "default";
+    } else {
+      row.addEventListener("click", () => {
+        if (isExpanded) expandedHistoryCats.delete(group.key);
+        else expandedHistoryCats.add(group.key);
+        App.render();
+      });
+    }
+    g.appendChild(row);
+    if (isExpanded) {
+      group.list
+        .slice()
+        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        .forEach((t) => {
+          const parts = [];
+          if (t.payee) parts.push(escapeHtml(t.payee));
+          if (t.note) parts.push(escapeHtml(t.note));
+          const detail = el(`
+            <div class="day-sub-row item-detail history-tx-row">
+              <div class="main"><div class="sub">${formatDateShort(t.date)}${parts.length ? " · " + parts.join(" · ") : ""}</div></div>
+              <div class="amt">${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
+            </div>
+          `);
+          detail.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openTransactionForm(state, t);
+          });
+          g.appendChild(detail);
+        });
+    }
+    return g;
+  }
+
+  // Statement breakdown by category: an Income/Outcome tab plus a Month/
+  // Total toggle over the same month-switcher every other page uses. Month
+  // mode scopes everything to state.month (like Home/Pockets); Total mode
+  // sums every transaction ever logged instead.
   function stats(state) {
-    setHeader("Stats");
+    setHeader("");
     const wrap = el(`<div></div>`);
+    wrap.appendChild(historySwitchRow(state));
+
+    const currency = DB.getSettings().currency;
+    const allTx = DB.listTransactions();
+    const scoped = historyTotalMode ? allTx : allTx.filter((t) => txInMonth(t, state.month));
+    const incomeTotal = scoped.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+    const outcomeTotal = scoped.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const net = incomeTotal - outcomeTotal;
+
+    wrap.appendChild(el(`
+      <div class="history-stats-row">
+        <div class="history-stat"><div class="history-stat-label income">Income</div><div class="history-stat-value income">${formatNumber(incomeTotal)}<span class="cur">${escapeHtml(currency)}</span></div></div>
+        <div class="history-stat"><div class="history-stat-label expense">Outcome</div><div class="history-stat-value expense">${formatNumber(outcomeTotal)}<span class="cur">${escapeHtml(currency)}</span></div></div>
+        <div class="history-stat"><div class="history-stat-label">Net</div><div class="history-stat-value">${formatNumber(net)}<span class="cur">${escapeHtml(currency)}</span></div></div>
+      </div>
+    `));
+
+    const tabs = el(`
+      <div class="seg history-tabs">
+        <button type="button" class="${historyTab === "income" ? "active income" : ""}" data-v="income">Income</button>
+        <button type="button" class="${historyTab === "expense" ? "active expense" : ""}" data-v="expense">Outcome</button>
+      </div>
+    `);
+    tabs.querySelectorAll("button").forEach((b) =>
+      b.addEventListener("click", () => {
+        historyTab = b.dataset.v;
+        App.render();
+      })
+    );
+    wrap.appendChild(tabs);
+
+    const tabTxs = scoped.filter((t) => t.type === historyTab);
+    if (!tabTxs.length) {
+      wrap.appendChild(el(`<div class="empty-state"><div class="big">📊</div><div>No ${historyTab === "income" ? "income" : "outcome"} ${historyTotalMode ? "logged yet" : "this month"}.</div></div>`));
+    } else {
+      const groups = el(`<div class="day-groups"></div>`);
+      historyCategoryGroups(tabTxs).forEach((g) => groups.appendChild(historyCategoryGroupEl(g, state)));
+      wrap.appendChild(groups);
+    }
+
+    return wrap;
+  }
+
+  // ---------- CHART (long-term month-over-month trends) ----------
+  // Reached from History's own chart button — a 12-month window ending at
+  // whichever month History has selected (defaults to the current one), so
+  // the shared month switcher still does something meaningful here.
+  function chartPage(state) {
+    setHeader("", `<button class="icon-btn" id="chart-back">←</button>`);
+    const wrap = el(`<div></div>`);
+    wrap.appendChild(monthSwitcher(state));
 
     const months = [];
-    for (let i = 11; i >= 0; i--) months.push(Utils.shiftMonth(Utils.monthKey(), -i));
+    for (let i = 11; i >= 0; i--) months.push(Utils.shiftMonth(state.month, -i));
 
     const allTx = DB.listTransactions();
     const perMonth = months.map((mk) => {
@@ -1432,6 +1598,7 @@
     const active = perMonth.filter((m) => m.income || m.expense || m.saving);
     if (!active.length) {
       wrap.appendChild(el(`<div class="empty-state"><div class="big">📊</div><div>No history yet.</div><div style="font-size:13px;margin-top:4px">Add some transactions and come back to see monthly trends.</div></div>`));
+      setTimeout(() => document.getElementById("chart-back").addEventListener("click", () => App.navigate("#/stats")));
       return wrap;
     }
     const avgExpense = active.reduce((s, m) => s + m.expense, 0) / active.length;
@@ -1467,6 +1634,7 @@
       .join("");
     wrap.appendChild(el(`<div class="card"><h2>Net by Month</h2><div class="bar-chart">${netRows}</div></div>`));
 
+    setTimeout(() => document.getElementById("chart-back").addEventListener("click", () => App.navigate("#/stats")));
     return wrap;
   }
 
@@ -1683,6 +1851,7 @@
     pocketsList,
     pocketDetail,
     stats,
+    chartPage,
     settings,
     openTransactionForm,
     handleSharedPhoto,

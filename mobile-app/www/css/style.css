@@ -467,6 +467,25 @@ nav.bottom-nav .nav-ic-add {
   font-size: 20px; font-weight: 700; color: var(--text); padding: 4px 8px;
 }
 
+/* ---- History page ---- */
+.history-switch { justify-content: space-between; gap: 10px; }
+.history-switch .month-nav { display: flex; align-items: center; justify-content: center; gap: 12px; flex: 1; }
+.history-chart-btn { width: 34px; height: 34px; flex: none; }
+.history-chart-btn img { width: 17px; height: 17px; object-fit: contain; }
+.history-stats-row { display: flex; justify-content: space-between; margin: 4px 2px 16px; gap: 8px; }
+.history-stat { flex: 1; text-align: center; }
+.history-stat-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.history-stat-label.income { color: var(--income); }
+.history-stat-label.expense { color: var(--expense); }
+.history-stat-value { font-size: 17px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.history-stat-value.income { color: var(--income); }
+.history-stat-value.expense { color: var(--expense); }
+.history-stat-value .cur { font-size: 11px; font-weight: 600; margin-left: 2px; opacity: .8; }
+.history-tabs { margin-bottom: 14px; }
+.history-tx-row { padding-left: 62px; cursor: pointer; }
+.history-tx-row .sub { font-size: 12px; opacity: .8; }
+.history-tx-row .amt { font-size: 13px; opacity: .9; }
+
 a.link-reset { color: var(--text-muted); font-size: 13px; text-decoration: underline; }
 
 .receipt-preview { margin-bottom: 14px; text-align: center; }
