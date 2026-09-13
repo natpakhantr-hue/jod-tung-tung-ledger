@@ -164,17 +164,19 @@ handler always sets `needsReview: false`).
   badge background), and `icons/category/*` (category icons, see below) are exported
   design assets — check `design/icons/` (untracked, gitignored-in-spirit scratch
   folder) for anything newer before reusing an old one.
-- **Category icons**: a category's `icon` is a path into the fixed `icons/category/`
-  image set (`CATEGORY_ICONS` in `views.js`), picked from a grid in `openCategoryForm`
-  — not free-typed emoji anymore. `categoryIconMarkup(icon, cls)` (`views.js`) is the
-  one place that decides how to render a category's `icon`: emits an `<img>` for a
-  path, or falls back to rendering old data's plain emoji as text — every call site
-  that shows a category's icon (Home rows, Pockets accordion, pocket detail, category
-  chips in Add Transaction/Add Pocket, the Settings category list) goes through it, so
-  a pre-existing install's old emoji categories keep displaying correctly without a
-  migration. Pocket icons (`POCKET_ICONS`) are a separate, still-emoji picker — don't
-  conflate the two; a pocket auto-created from a bill's own "+" never inherits the
-  bill's category icon, it always gets a plain emoji default.
+- **Category and Pocket icons**: both a category's and a pocket's `icon` are a path
+  into the same fixed `icons/category/` image set (`CATEGORY_ICONS` in `views.js`;
+  `POCKET_ICONS` is just `= CATEGORY_ICONS`, one shared list), picked from a grid in
+  `openCategoryForm` / `openPocketForm` — not free-typed emoji anymore.
+  `iconMarkup(icon, cls)` (`views.js`) is the one place that decides how to render
+  either kind of icon: emits an `<img>` for a path, or falls back to rendering old
+  data's plain emoji as text — every call site that shows a category's or pocket's
+  icon (Home rows, Pockets accordion, pocket detail, category/pocket chips in Add
+  Transaction/Add Pocket, the Settings category list) goes through it, so a
+  pre-existing install's old emoji categories/pockets keep displaying correctly
+  without a migration. A pocket auto-created from a bill's own "+" (no explicit
+  pocket picked) gets a fixed default icon (piggy-bank for a saving reminder,
+  briefcase otherwise) — it never inherits the bill's own category icon.
 - **Single light theme only** — no `@media (prefers-color-scheme: dark)` block. This
   is deliberate: the app matches one specific Figma design regardless of the phone's
   system theme. Don't reintroduce a dark-mode override.

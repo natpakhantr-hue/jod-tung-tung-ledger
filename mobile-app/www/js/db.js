@@ -124,7 +124,7 @@
     listPockets: () => data.pockets.slice(),
     getPocket: (id) => data.pockets.find((p) => p.id === id),
     addPocket(pocket) {
-      const p = { id: uid(), name: pocket.name, color: pocket.color || "#4f46e5", icon: pocket.icon || "💼" };
+      const p = { id: uid(), name: pocket.name, color: pocket.color || "#4f46e5", icon: pocket.icon || "icons/category/briefcase.png" };
       data.pockets.push(p);
       persist();
       return p;
