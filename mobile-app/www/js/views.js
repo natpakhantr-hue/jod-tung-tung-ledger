@@ -1402,7 +1402,6 @@
         amount: result.amount,
         categoryId,
         payee: result.payee || "",
-        note: "Auto-logged from slip photo",
         receiptImage: dataUrl,
         autoLogged: true,
       });
