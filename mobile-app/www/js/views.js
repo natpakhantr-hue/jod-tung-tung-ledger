@@ -108,7 +108,7 @@
           dayTxs.forEach((t) => {
             const c = categoryById(t.categoryId);
             const pocket = t.pocketId ? DB.getPocket(t.pocketId) : null;
-            const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : t.type === "transfer" ? "🔁" : "💸";
+            const fallbackIcon = t.type === "income" ? "💰" : t.type === "saving" ? "🐷" : t.type === "transfer" ? "icons/tx/transfer.png" : "💸";
             const amtSign = t.type === "income" ? "+" : t.type === "transfer" ? "" : "-";
             const subParts = [];
             if (pocket) subParts.push(escapeHtml(pocket.name));
@@ -121,9 +121,9 @@
             if (t.note && (!t.autoLogged || t.needsReview)) subParts.push(escapeHtml(t.note));
             const row = el(`
               <div class="day-sub-row">
-                <div class="emoji">${c ? iconMarkup(c.icon) : fallbackIcon}</div>
+                <div class="emoji">${c ? iconMarkup(c.icon) : iconMarkup(fallbackIcon)}</div>
                 <div class="main">
-                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.needsReview ? " ⚠️" : ""}</div>
+                  <div class="title">${c ? escapeHtml(c.name) : "Uncategorized"}${t.tag ? " · " + escapeHtml(t.tag) : ""}${t.receiptImage ? " 📷" : ""}${t.needsReview ? ` <img class="tx-warn-icon" src="icons/tx/warning.png" alt="NO QR slip">` : ""}</div>
                   <div class="sub">${subParts.join(" · ")}</div>
                 </div>
                 <div class="amt ${t.type}">${amtSign}${formatNumber(t.amount)} ${escapeHtml(currency)}</div>
@@ -1388,7 +1388,7 @@
           amount: 0,
           categoryId: defaultAutoCategoryId(),
           payee: result.payee || "",
-          note: "Slip photo — no amount detected, please check",
+          note: "NO QR slip — enter the amount yourself",
           receiptImage: dataUrl,
           autoLogged: true,
           needsReview: true,

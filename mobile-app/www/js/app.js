@@ -229,7 +229,7 @@
       if (logged || needsReview || unreadable) {
         const parts = [];
         if (logged) parts.push(`${logged} slip${logged === 1 ? "" : "s"} logged automatically`);
-        if (needsReview) parts.push(`${needsReview} logged with no amount — please check`);
+        if (needsReview) parts.push(`${needsReview} NO QR slip — please check`);
         if (unreadable) parts.push(`${unreadable} photo${unreadable === 1 ? "" : "s"} skipped`);
         toast(parts.join(" · "));
       }
