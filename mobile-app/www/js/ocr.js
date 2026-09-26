@@ -3,16 +3,25 @@
 (function () {
   "use strict";
 
+  // A stalled request (no error event, just never finishing — happens on some
+  // flaky mobile connections) used to hang this forever, and a failed load
+  // used to be cached permanently, breaking OCR for the rest of the app
+  // session. Both are bounded/reset here so one bad attempt can't wedge
+  // every future slip scan.
   let loaderPromise;
   function loadTesseract() {
     if (window.Tesseract) return Promise.resolve();
     if (loaderPromise) return loaderPromise;
-    loaderPromise = new Promise((resolve, reject) => {
+    const load = new Promise((resolve, reject) => {
       const s = document.createElement("script");
       s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
       s.onload = () => resolve();
       s.onerror = () => reject(new Error("Couldn't load the OCR engine (check your internet connection)"));
       document.head.appendChild(s);
+    });
+    loaderPromise = Utils.withTimeout(load, 20000, "Timed out loading the OCR engine (check your internet connection)");
+    loaderPromise.catch(() => {
+      loaderPromise = null; // let the next scan attempt retry from scratch
     });
     return loaderPromise;
   }
@@ -92,11 +101,18 @@
 
   async function scanReceipt(imageSource, onProgress) {
     await loadTesseract();
-    const { data } = await window.Tesseract.recognize(imageSource, "eng+tha", {
-      logger: (m) => {
-        if (onProgress && m.status === "recognizing text") onProgress(m.progress);
-      },
-    });
+    // Tesseract's worker can occasionally wedge on a bad image (no error, it
+    // just never posts back) — bound it so one photo can't hang every scan
+    // after it.
+    const { data } = await Utils.withTimeout(
+      window.Tesseract.recognize(imageSource, "eng+tha", {
+        logger: (m) => {
+          if (onProgress && m.status === "recognizing text") onProgress(m.progress);
+        },
+      }),
+      45000,
+      "OCR timed out reading this photo"
+    );
     const text = data.text || "";
     return { text, amount: extractAmount(text), date: extractDate(text), payee: extractPayee(text) };
   }
