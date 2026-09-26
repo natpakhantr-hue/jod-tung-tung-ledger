@@ -1754,12 +1754,32 @@
     return wrap;
   }
 
-  function exportData() {
-    const blob = new Blob([JSON.stringify(DB.get(), null, 2)], { type: "application/json" });
+  async function exportData() {
+    const json = JSON.stringify(DB.get(), null, 2);
+    const filename = `ledger-backup-${todayISO()}.json`;
+
+    // The Android WebView the native app runs in has no download manager, so
+    // a plain <a download> blob link (the fallback below) just does nothing —
+    // no error, no save dialog. The Web Share API's file support works there
+    // instead (opens the native share/save sheet), so try that first.
+    if (navigator.canShare) {
+      try {
+        const file = new File([json], filename, { type: "application/json" });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: "Ledger Backup" });
+          return;
+        }
+      } catch (e) {
+        if (e && e.name === "AbortError") return; // user closed the share sheet
+        // fall through to the download-link fallback below
+      }
+    }
+
+    const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `ledger-backup-${todayISO()}.json`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
