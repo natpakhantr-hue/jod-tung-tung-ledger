@@ -87,6 +87,18 @@
     return `${monthKey}-${pad2(d)}`;
   }
 
+  // Races a promise against a timer so a hung network request or worker call
+  // (no error, just never resolving) can't stall a caller forever — rejects
+  // with `message` instead. The original promise is left to settle on its own
+  // in the background; only the timer is what gets cleared.
+  function withTimeout(promise, ms, message) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message || "Timed out")), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
   window.Utils = {
     pad2,
     monthKey,
@@ -102,5 +114,6 @@
     el,
     daysInMonth,
     dateForDay,
+    withTimeout,
   };
 })();

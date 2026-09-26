@@ -211,10 +211,17 @@
         );
         const id = photoIdFromUri(img.uri);
         try {
-          const { base64 } = await GalleryScan.readImageBase64({ uri: img.uri });
-          const blob = await (await fetch("data:image/jpeg;base64," + base64)).blob();
-          const dataUrl = await window.Views.blobToResizedDataUrl(blob, 900);
-          const result = await window.Views.autoLogSlip(dataUrl);
+          // Belt-and-suspenders: even with OCR's own internal timeout, bound
+          // the whole per-photo pipeline so a stall anywhere in it (the
+          // native plugin call, the data URL fetch/resize) can't leave the
+          // "Reading slip photo…" banner stuck forever and the rest of the
+          // batch never gets scanned.
+          const result = await Utils.withTimeout((async () => {
+            const { base64 } = await GalleryScan.readImageBase64({ uri: img.uri });
+            const blob = await (await fetch("data:image/jpeg;base64," + base64)).blob();
+            const dataUrl = await window.Views.blobToResizedDataUrl(blob, 900);
+            return window.Views.autoLogSlip(dataUrl);
+          })(), 60000, "Timed out reading this slip photo");
           if (result.needsReview) needsReview++;
           else if (result.logged) logged++;
           else unreadable++;
