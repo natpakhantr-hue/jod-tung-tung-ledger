@@ -1757,11 +1757,12 @@
   async function exportData() {
     const json = JSON.stringify(DB.get(), null, 2);
     const filename = `ledger-backup-${todayISO()}.json`;
+    const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
 
     // The Android WebView the native app runs in has no download manager, so
-    // a plain <a download> blob link (the fallback below) just does nothing —
-    // no error, no save dialog. The Web Share API's file support works there
-    // instead (opens the native share/save sheet), so try that first.
+    // a plain <a download> blob link (used below for real browsers) just does
+    // nothing there — no error, no save dialog. The Web Share API's file
+    // support opens the native share/save sheet instead, so try that first.
     if (navigator.canShare) {
       try {
         const file = new File([json], filename, { type: "application/json" });
@@ -1771,19 +1772,55 @@
         }
       } catch (e) {
         if (e && e.name === "AbortError") return; // user closed the share sheet
-        // fall through to the download-link fallback below
+        // fall through — Share failed for some other reason, try the next option
       }
     }
 
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    if (!isNative) {
+      // Plain browsers handle this reliably.
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    // Last resort for the native app when Share isn't available or fails
+    // (e.g. an older system WebView without file-share support): show the
+    // raw backup text so it can always be copied out by hand, since neither
+    // of the above is guaranteed to work in every WebView.
+    showBackupTextSheet(json, filename);
+  }
+
+  function showBackupTextSheet(json, filename) {
+    App.openSheet("Backup Data", `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+        Couldn't open a share/save dialog on this device. Copy the text below and save it yourself as <b>${escapeHtml(filename)}</b>.
+      </div>
+      <textarea id="backup-text" readonly style="width:100%;height:220px;font-family:monospace;font-size:11px;white-space:pre;">${escapeHtml(json)}</textarea>
+      <div class="sheet-actions">
+        <button class="primary" id="copy-backup">Copy to Clipboard</button>
+      </div>
+    `, (sheetBody) => {
+      const ta = sheetBody.querySelector("#backup-text");
+      sheetBody.querySelector("#copy-backup").addEventListener("click", async () => {
+        ta.focus();
+        ta.select();
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(json);
+          copied = true;
+        } catch (e) {
+          try { copied = document.execCommand("copy"); } catch (e2) { /* neither worked */ }
+        }
+        App.toast(copied ? "Copied to clipboard" : "Select the text above and copy it manually");
+      });
+    });
   }
 
   function importData(e) {
