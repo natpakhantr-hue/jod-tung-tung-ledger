@@ -1772,7 +1772,7 @@
         }
       } catch (e) {
         if (e && e.name === "AbortError") return; // user closed the share sheet
-        // fall through — Share failed for some other reason, try the next option
+        // fall through — file-sharing failed, try the next option
       }
     }
 
@@ -1790,27 +1790,47 @@
       return;
     }
 
-    // Last resort for the native app when Share isn't available or fails
-    // (e.g. an older system WebView without file-share support): show the
-    // raw backup text so it can always be copied out by hand, since neither
-    // of the above is guaranteed to work in every WebView.
+    // File-sharing isn't universally supported, but plain-text sharing is a
+    // much older, more broadly supported part of the same API — try it
+    // before giving up on Share entirely. Whatever the user picks (Notes,
+    // email, chat app...) gets the raw JSON, no clipboard involved at all.
+    if (navigator.share) {
+      try {
+        await navigator.share({ text: json, title: "Ledger Backup" });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+      }
+    }
+
+    // Last resort: show the raw backup text so it can be copied out by hand.
+    // Selecting a long block of text by dragging on a phone is painful and
+    // error-prone, so the textarea is pre-selected on open — the copy button
+    // is a convenience on top of that, not the only way to grab it.
     showBackupTextSheet(json, filename);
   }
 
   function showBackupTextSheet(json, filename) {
     App.openSheet("Backup Data", `
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
-        Couldn't open a share/save dialog on this device. Copy the text below and save it yourself as <b>${escapeHtml(filename)}</b>.
+        Couldn't open a share dialog on this device. The text below is already selected —
+        use your keyboard's Copy action, or the button, to copy it. Save it yourself as <b>${escapeHtml(filename)}</b>.
       </div>
       <textarea id="backup-text" readonly style="width:100%;height:220px;font-family:monospace;font-size:11px;white-space:pre;">${escapeHtml(json)}</textarea>
       <div class="sheet-actions">
+        <button class="secondary" id="select-backup">Select All</button>
         <button class="primary" id="copy-backup">Copy to Clipboard</button>
       </div>
     `, (sheetBody) => {
       const ta = sheetBody.querySelector("#backup-text");
+      const selectAll = () => { ta.focus(); ta.select(); };
+      // Pre-select immediately so the device's native copy affordance (a
+      // floating "Copy" chip, or the keyboard's copy key) is available right
+      // away without the user needing to drag-select a huge block of text.
+      selectAll();
+      sheetBody.querySelector("#select-backup").addEventListener("click", selectAll);
       sheetBody.querySelector("#copy-backup").addEventListener("click", async () => {
-        ta.focus();
-        ta.select();
+        selectAll();
         let copied = false;
         try {
           await navigator.clipboard.writeText(json);
@@ -1818,7 +1838,7 @@
         } catch (e) {
           try { copied = document.execCommand("copy"); } catch (e2) { /* neither worked */ }
         }
-        App.toast(copied ? "Copied to clipboard" : "Select the text above and copy it manually");
+        App.toast(copied ? "Copied to clipboard" : "Text is selected — use your keyboard/menu's Copy action");
       });
     });
   }
