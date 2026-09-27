@@ -1759,6 +1759,28 @@
     const filename = `ledger-backup-${todayISO()}.json`;
     const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
 
+    // Every browser-JS approach below (Web Share with a file, Web Share with
+    // plain text, clipboard copy) has turned out to be unreliable in this
+    // app's own Android WebView for at least some users — they're all at the
+    // mercy of what that WebView's JS engine happens to implement. The
+    // Filesystem + Share native plugins sidestep that entirely: they write a
+    // real file via Android's own filesystem APIs and hand it to Android's
+    // real share sheet, the same mechanism any other app's "export" uses. Try
+    // this first whenever it's present (it needs the app rebuilt with these
+    // plugins — see mobile-app/package.json — so an older already-installed
+    // build falls through to the chain below instead).
+    if (isNative && window.Capacitor.Plugins.Filesystem && window.Capacitor.Plugins.Share) {
+      try {
+        const { Filesystem, Share } = window.Capacitor.Plugins;
+        const { uri } = await Filesystem.writeFile({ path: filename, data: json, directory: "CACHE", encoding: "utf8" });
+        await Share.share({ title: "Ledger Backup", dialogTitle: "Save Backup", files: [uri] });
+        return;
+      } catch (e) {
+        if (e && /cancel/i.test(e.message || "")) return; // user closed the share sheet
+        // fall through to the browser-only paths below on any other failure
+      }
+    }
+
     // The Android WebView the native app runs in has no download manager, so
     // a plain <a download> blob link (used below for real browsers) just does
     // nothing there — no error, no save dialog. The Web Share API's file

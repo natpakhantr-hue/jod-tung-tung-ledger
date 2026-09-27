@@ -176,6 +176,27 @@ handler always sets `needsReview: false`).
   month-grid popup.
 - **Amount entry**: `calculatorHtml()` / `wireCalculator()` / `readAmountValue()` — a
   hand-rolled calculator (no `eval()`), reused by both Add Transaction and Add Pocket.
+- **Saving a file to the device** (Settings' "Export Backup"): every browser-JS
+  approach turned out unreliable in this app's own Android WebView for at least some
+  users, one at a time — plain `<a download>` + blob URL, the Web Share API with a
+  file, Web Share with plain text, `navigator.clipboard`/`execCommand('copy')`. All of
+  those are still in `exportData()` (`views.js`) as a fallback chain (roughly: native
+  Filesystem+Share → Web Share file → download link → Web Share text → a
+  `showBackupTextSheet()` you copy from by hand), but the real fix on native is the
+  **first** branch: write the backup via the `@capacitor/filesystem` plugin
+  (`Directory.CACHE`) and hand it to Android's own share sheet via `@capacitor/share`
+  — both added to `mobile-app/package.json`. This is actual OS filesystem/share, not a
+  WebView JS API, so it isn't at the mercy of what that WebView happens to implement.
+  **Only takes effect after a native rebuild** (unlike every other fix in this
+  project) — the JS ships instantly like normal, but it feature-detects
+  `window.Capacitor.Plugins.Filesystem`/`.Share` and silently falls through to the old
+  chain until the installed app actually has these plugins compiled in. Rebuilding
+  needs `npx cap sync android` first (regenerates the gitignored
+  `capacitor.plugins.json` plugin registry) before `./gradlew assembleDebug` /
+  Android Studio's build — skip that sync and the new plugins won't be registered even
+  though the JS calls them. The existing FileProvider (`AndroidManifest.xml` +
+  `res/xml/file_paths.xml`, originally set up for the shared-photo-inbox feature)
+  already covers `Directory.CACHE`, so no manifest changes were needed for this.
 - **Dark-row sheet style** (`.tx-row`, `.tx-panel`, `.tx-icon-badge`, `.tx-sheet-head`)
   is the current design language for every "Add/Edit" sheet — match it for new forms
   rather than falling back to the older plain `.field`/`.card` styles still used by
