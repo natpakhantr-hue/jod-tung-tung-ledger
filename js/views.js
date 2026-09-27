@@ -1811,22 +1811,35 @@
   }
 
   function showBackupTextSheet(json, filename) {
+    // A readonly <textarea> is known to suppress the native "Copy" option in
+    // some Android WebViews (selection still highlights, but the OS context
+    // menu that pops up over it won't offer Copy) — a plain text block with
+    // normal text selection doesn't have that restriction, so use one of
+    // those instead of a form field.
     App.openSheet("Backup Data", `
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
-        Couldn't open a share dialog on this device. The text below is already selected —
-        use your keyboard's Copy action, or the button, to copy it. Save it yourself as <b>${escapeHtml(filename)}</b>.
+        Couldn't open a share dialog on this device. Long-press the text below to select
+        and copy it natively, or use the button. Save it yourself as <b>${escapeHtml(filename)}</b>.
       </div>
-      <textarea id="backup-text" readonly style="width:100%;height:220px;font-family:monospace;font-size:11px;white-space:pre;">${escapeHtml(json)}</textarea>
+      <div id="backup-text" class="backup-text-block" tabindex="0">${escapeHtml(json)}</div>
       <div class="sheet-actions">
         <button class="secondary" id="select-backup">Select All</button>
         <button class="primary" id="copy-backup">Copy to Clipboard</button>
       </div>
     `, (sheetBody) => {
       const ta = sheetBody.querySelector("#backup-text");
-      const selectAll = () => { ta.focus(); ta.select(); };
+      const selectAll = () => {
+        ta.focus();
+        const range = document.createRange();
+        range.selectNodeContents(ta);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      };
       // Pre-select immediately so the device's native copy affordance (a
-      // floating "Copy" chip, or the keyboard's copy key) is available right
-      // away without the user needing to drag-select a huge block of text.
+      // floating "Copy" chip on long-press, or a keyboard's copy key) is
+      // available right away without the user needing to drag-select a huge
+      // block of text themselves.
       selectAll();
       sheetBody.querySelector("#select-backup").addEventListener("click", selectAll);
       sheetBody.querySelector("#copy-backup").addEventListener("click", async () => {
@@ -1838,7 +1851,7 @@
         } catch (e) {
           try { copied = document.execCommand("copy"); } catch (e2) { /* neither worked */ }
         }
-        App.toast(copied ? "Copied to clipboard" : "Text is selected — use your keyboard/menu's Copy action");
+        App.toast(copied ? "Copied to clipboard" : "Text is selected — long-press it and tap Copy");
       });
     });
   }
